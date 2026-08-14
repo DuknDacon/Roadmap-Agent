@@ -1,0 +1,11 @@
+google-genai<2,>=1.0
+langgraph<2,>=0.4
+llama-index-core<1,>=0.12
+psycopg[binary]<4,>=3.2
+
+[dev]
+pytest>=8
+ruff>=0.9
+
+[ui]
+streamlit<2,>=1.40
