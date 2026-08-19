@@ -21,6 +21,25 @@ class RagChunkTest(unittest.TestCase):
         self.assertEqual(len(chunks), 3)
         self.assertTrue(all(len(content) <= 10 for _, content in chunks))
 
+    def test_law_source_splits_circled_paragraphs_and_keeps_parent_context(self):
+        from roadmap_agent.rag_chunking import chunk_markdown
+
+        chunks = chunk_markdown(
+            "# 제1조\n\n① 가입 요건이다.\n\n② 해지 요건이다.",
+            source_type="law",
+        )
+
+        self.assertEqual(len(chunks), 2)
+        self.assertTrue(chunks[0].content.startswith("①"))
+        self.assertIn("② 해지 요건", chunks[0].parent_content)
+
+    def test_frontmatter_is_metadata_not_search_content(self):
+        chunks = MODULE.chunk_markdown(
+            "---\ntitle: 비밀 메타데이터\n---\n# 본문\n\n검색 내용"
+        )
+
+        self.assertEqual(chunks, [("본문#1", "검색 내용")])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -45,6 +45,22 @@ def apply_conversation_change(
         value = float(ratio.group(1)) / 100
         changes["max_investment_ratio"] = value
         descriptions.append(f"투자비중 상한 {value:.0%}")
+    elif re.search(r"(?:위험|투자\s*비중).{0,10}(?:더\s*)?(?:줄여|낮춰)", text):
+        current = request.max_investment_ratio
+        if current is None:
+            current = {
+                "conservative": 0.2,
+                "balanced": 0.4,
+                "aggressive": 0.7,
+            }[request.risk_profile.value]
+        value = max(round(current - 0.1, 2), 0)
+        changes["max_investment_ratio"] = value
+        descriptions.append(f"투자비중 상한 {value:.0%}")
+    elif re.search(r"(?:위험|투자\s*비중).{0,10}(?:더\s*)?(?:늘려|높여)", text):
+        current = request.max_investment_ratio or 0
+        value = min(round(current + 0.1, 2), 1)
+        changes["max_investment_ratio"] = value
+        descriptions.append(f"투자비중 상한 {value:.0%}")
 
     target_date = re.search(r"(20\d{2})\s*년\s*(\d{1,2})\s*월", text)
     if target_date:

@@ -149,6 +149,7 @@ def _savings_product_scenario(
             *common_evidence,
         ],
         data_status="structured_finlife_candidate",
+        monthly_limit=product.maximum_monthly_payment,
     )
 
 
@@ -229,7 +230,7 @@ def policy_candidate_scenarios(
     ]
     if not candidates:
         return []
-    evidence = retriever.search("ISA 가입 대상 세제혜택 연금계좌", 3)
+    common_evidence = retriever.search("청년 정책 정부기여금 자산형성", 2)
     scenarios = []
     for policy in sorted(
         candidates, key=lambda item: item.estimated_support, reverse=True
@@ -245,7 +246,8 @@ def policy_candidate_scenarios(
         best_rate = policy.support_rate
         if (
             policy.preferential_support_rate is not None
-            and request.is_sme_employee is not False
+            and policy.benefit_tier == "preferential"
+            and policy.qualification_status == "confirmed"
         ):
             best_rate = policy.preferential_support_rate
         best_support = (
@@ -313,8 +315,17 @@ def policy_candidate_scenarios(
                     ),
                     availability_warning,
                 ],
-                evidence=evidence,
+                evidence=[
+                    Evidence(
+                        title=f"{policy.name} 공식정보",
+                        source_url=policy.source_url,
+                        path=f"policy:{policy.policy_id}",
+                        score=100,
+                    ),
+                    *common_evidence,
+                ],
                 data_status="structured_policy_candidate",
+                monthly_limit=policy.monthly_limit,
             )
         )
     return scenarios
@@ -410,6 +421,6 @@ def balanced_agent(
         warnings=warnings,
         unallocated_cash=unallocated_monthly * request.horizon_months,
         shortfall=target_gap(base, request.target_amount),
-        evidence=retriever.search("저축 ISA 분산투자 연금 위험", 3),
+        evidence=retriever.search("저축 ISA 분산투자 원금손실 위험", 3),
         data_status=data_status,
     )

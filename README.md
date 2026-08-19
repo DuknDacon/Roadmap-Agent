@@ -20,21 +20,36 @@ SeedUp의 기능 2인 **AI 자산 관리 및 시드머니 로드맵** 전용 저
 
 ```text
 src/roadmap_agent/
-  domain.py       요청·결과 모델
-  calculators.py 결정론적 계산 함수
-  retrieval.py   로컬 공식 문서 검색 초안
-  agents.py      품목별 시나리오 노드
-  orchestrator.py 전체 흐름 및 LangGraph 구성
-  cli.py         로컬 실행 진입점
-data/rag/         ISA·연금 공식 RAG 원문
-data/source_docs/ 수집 원문·API 가이드
-scripts/          복지서비스·금융꿀팁 수집기
-tests/            단위 테스트
+  intake.py               단계형 입력 정규화
+  domain.py               요청·결과 모델
+  calculators.py          결정론적 계산 함수
+  agents.py               품목별 시나리오 노드
+  repositories.py         PostgreSQL 적금·정책 Repository, 실제 API 필드 매핑
+  policy_qualification.py 기준 중위소득 계산
+  policy_rules.py         검증된 JSON 규칙 기반 자격판정 엔진(현재 프로덕션 미연결)
+  retrieval.py            로컬·pgvector RAG 검색
+  rag_chunking.py         헤딩·법령 조항 경계 보존 청커
+  conversation.py         Agentic 대화 의도 분류·도구 실행
+  conversation_graph.py   LangGraph 대화 스레드 상태
+  gemini.py               Gemini 설명·대화 계획기·임베딩·웹 검색
+  orchestrator.py         전체 흐름 및 LangGraph 구성
+  cli.py                  로컬 실행 진입점
+data/rag/                 ISA·연금·정책 공식 RAG 원문
+data/source_docs/         수집 원문·API 가이드
+scripts/                  RAG 인덱싱, 복지서비스·금융꿀팁 수집기
+tests/                    단위 테스트
+backend/                  SeedUp 프론트엔드가 호출하는 FastAPI 어댑터 (별도 README 참고)
 ```
 
 ## 로컬 실행
 
-저장소 상위에 준비된 가상환경을 사용합니다.
+저장소 상위(`Roadmap-Agent/`와 `SeedUp/`의 공통 상위 폴더)에 준비된 **공용 가상환경**을 사용합니다. `backend/`(FastAPI 어댑터)도 같은 가상환경을 그대로 씁니다 — 따로 만들지 않습니다. 처음 준비하는 경우:
+
+```bash
+python -m venv ../.venv
+../.venv/bin/pip install -r requirements.txt
+../.venv/bin/pip install -e .
+```
 
 ```bash
 ../.venv/bin/python -m unittest discover -s tests -v
@@ -148,6 +163,52 @@ docker compose exec -T postgres \
 ```
 
 명령 끝에 finlife 상품·옵션, 온통청년 정책, 복지서비스 상세의 적재 건수가 출력됩니다. 같은 명령을 다시 실행해도 기본 키 기준으로 갱신되며 중복 행을 만들지 않습니다.
+
+## 백엔드·프론트엔드 실행 (기능 2 전체 스택)
+
+기능②의 FastAPI 백엔드(`backend/`)는 이 저장소 안에 있습니다. SeedUp 저장소에는 프론트엔드(Next.js)만 있고, `NEXT_PUBLIC_ROADMAP_API_URL`로 이 백엔드를 HTTP로 호출합니다. 브라우저에서 기능 2를 끝까지 확인하려면 두 프로세스를 함께 띄웁니다.
+
+**1. 백엔드 (FastAPI, 이 저장소)** — 위 "로컬 실행" 절의 같은 가상환경을 그대로 사용합니다. 자세한 설정은 [`backend/README.md`](backend/README.md) 참고.
+
+```bash
+source ../.venv/bin/activate
+pip install -r backend/requirements.txt   # roadmap_agent 자체는 이미 위에서 editable 설치됨
+uvicorn backend.app.main:app --reload --port 8001
+```
+
+- 헬스체크: `http://localhost:8001/health`
+- API 문서: `http://localhost:8001/docs`
+- 시작 시 저장소 루트의 `.env`를 먼저 읽고 `backend/.env`로 보완합니다. 브라우저에는 이 값이 전달되지 않습니다.
+- `POSTGRES_*`를 설정해야 실제 적금·정책 Repository가 활성화되고, `ENABLE_GEMINI=true` + `GEMINI_API_KEY`가 있어야 최종 설명과 대화 계획기가 동작합니다. 두 플래그를 모두 비활성화하면 외부 API 비용 없이 결정론적 계산만 확인할 수 있습니다.
+
+**2. SeedUp 프론트엔드 (Next.js)** — 별도 터미널에서 `SeedUp/`:
+
+```bash
+cd ../SeedUp
+npm install
+NEXT_PUBLIC_ROADMAP_API_URL=http://localhost:8001 npm run dev
+```
+
+- 기본 접속: `http://localhost:3000`
+- `NEXT_PUBLIC_ROADMAP_API_URL`을 생략하면 `http://localhost:8001`을 기본값으로 사용합니다.
+
+두 프로세스가 모두 떠 있으면 `http://localhost:3000`에서 최초 로드맵 생성부터 조건 변경·후속 질문까지 실제 브라우저로 확인할 수 있습니다. 자동화된 브라우저(e2e) 테스트는 아직 없으므로, 현재는 이 수동 실행 경로가 유일한 종단 확인 방법입니다.
+
+## 배포 (Docker)
+
+이 저장소 루트의 `Dockerfile`이 `roadmap_agent`와 `backend/`를 하나의 이미지로 빌드합니다.
+레지스트리는 쓰지 않고, 빌드는 로컬에서 끝낸 뒤 완성된 이미지 파일 하나만 서버로 전달합니다.
+
+```bash
+docker build -t seedup-roadmap-backend:v1 .
+docker save -o seedup-roadmap-backend-v1.tar seedup-roadmap-backend:v1
+scp seedup-roadmap-backend-v1.tar <서버>:/path/to/
+# 서버에서:
+docker load -i /path/to/seedup-roadmap-backend-v1.tar
+docker run -d --env-file backend/.env -p 8001:8001 seedup-roadmap-backend:v1
+```
+
+서버는 이 레포도 SeedUp 레포도 clone할 필요가 없습니다 (프론트엔드를 같은 서버에서 돌릴 경우 그쪽만 별도로 SeedUp을 clone). 자세한 배경과 현재 진행 상태는 Notion 「[기능 2] 서버 배포 준비」 페이지를 참고합니다.
 
 ## 설계 원칙
 

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from roadmap_agent.domain import RiskProfile, RoadmapRequest
-from roadmap_agent.orchestrator import run_roadmap
+from roadmap_agent.orchestrator import run_conversation, run_roadmap
 from roadmap_agent.ports import PolicyBenefit, SavingsProduct
 
 
@@ -22,6 +22,8 @@ class PolicyRepositoryStub:
                 reason="목 데이터 자격 충족",
                 support_rate=0.06,
                 preferential_support_rate=0.12,
+                qualification_status="confirmed",
+                benefit_tier="preferential",
             )
         ]
 
@@ -106,6 +108,20 @@ class DuplicateOptionsSavingsRepositoryStub:
 
 
 class OrchestratorTest(unittest.TestCase):
+    def test_public_conversation_entrypoint_reuses_existing_result(self):
+        request = RoadmapRequest(800_000, 36, None, RiskProfile.CONSERVATIVE)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = run_roadmap(request, Path(temp_dir))
+            response = run_conversation(
+                request,
+                result,
+                "왜 이 상품을 추천했어?",
+                rag_root=Path(temp_dir),
+            )
+        self.assertEqual(response.intent, "result_explanation")
+        self.assertEqual(response.result.recommended, result.recommended)
+        self.assertEqual(response.executed_tools, ("result_explainer",))
+
     def test_returns_recommendation_and_one_alternative_without_llm(self):
         request = RoadmapRequest(
             monthly_budget=800_000,
@@ -139,6 +155,9 @@ class OrchestratorTest(unittest.TestCase):
         )
         self.assertEqual(policy.expected_min, 29_880_000)
         self.assertEqual(policy.expected_max, 30_960_000)
+        self.assertEqual(policy.monthly_limit, 500_000)
+        self.assertEqual(policy.evidence[0].title, "검증 정책 공식정보")
+        self.assertEqual(policy.evidence[0].source_url, "https://example.test/policy")
 
     def test_savings_scenario_includes_unallocated_cash_in_total(self):
         request = RoadmapRequest(800_000, 36, None, RiskProfile.CONSERVATIVE)
@@ -174,6 +193,7 @@ class OrchestratorTest(unittest.TestCase):
         savings = next(item for item in scenarios if item.kind == "savings")
         self.assertIn("실데이터적금", savings.title)
         self.assertEqual(savings.data_status, "structured_finlife_candidate")
+        self.assertEqual(savings.monthly_limit, 500_000)
         self.assertEqual(savings.evidence[0].source_url, "https://example.test/savings")
         self.assertIsNone(savings.additional_months)
         self.assertTrue(result.assumptions["structured_product_data_connected"])

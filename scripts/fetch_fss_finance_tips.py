@@ -272,6 +272,34 @@ def _request(
     raise FinanceTipsApiError(f"API 요청이 3회 실패했습니다: {last_error}")
 
 
+def _row_identity(row: dict[str, Any]) -> tuple[str, str]:
+    return (_pick(row, FIELD_ALIASES["id"]), _pick(row, FIELD_ALIASES["title"]))
+
+
+def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        identity = _row_identity(row)
+        if identity not in seen:
+            unique.append(row)
+            seen.add(identity)
+    return unique
+
+
+def rows_from_cache(cache_dir: Path) -> list[dict[str, Any]]:
+    """API를 호출하지 않고, 지금까지 체크포인트로 저장된 월별 캐시만 모은다.
+
+    전체 수집기간이 끝나기 전에도 지금까지 모인 원문으로 RAG 문서를 먼저
+    만들어보고 싶을 때 사용한다(`--rag-only`).
+    """
+    rows: list[dict[str, Any]] = []
+    for cache_path in sorted(cache_dir.glob("*.json")):
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        rows.extend(cached.get("rows", []))
+    return _dedupe_rows(rows)
+
+
 def fetch_all(
     endpoint: str,
     api_key: str,
@@ -335,10 +363,7 @@ def fetch_all(
             new_requests += 1
             print(f"조회 기간 {window_start}~{window_end}: {len(rows)}건", file=sys.stderr)
         for row in rows:
-            identity = (
-                _pick(row, FIELD_ALIASES["id"]),
-                _pick(row, FIELD_ALIASES["title"]),
-            )
+            identity = _row_identity(row)
             if identity not in seen:
                 unique.append(row)
                 seen.add(identity)
@@ -481,6 +506,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--keyword", action="append", help="선별 키워드(여러 번 지정 가능)"
     )
     parser.add_argument("--all", action="store_true", help="키워드 선별 없이 전부 문서화")
+    parser.add_argument(
+        "--rag-only", action="store_true",
+        help="API를 호출하지 않고 지금까지 캐시된 월별 원문만으로 RAG 문서를 다시 만든다",
+    )
     parser.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
     parser.add_argument("--rag-dir", type=Path, default=Path("data/rag/finance_tips"))
     parser.add_argument(
@@ -517,6 +546,19 @@ def main() -> int:
     if args.max_new_requests < 1 or args.max_new_requests > 30:
         print("오류: --max-new-requests는 1~30이어야 합니다.", file=sys.stderr)
         return 2
+
+    if args.rag_only:
+        rows = rows_from_cache(args.cache_dir)
+        keywords = tuple(args.keyword) if args.keyword else DEFAULT_KEYWORDS
+        selected = rows if args.all else filter_rows(rows, keywords)
+        json_path, markdown_paths = write_outputs(
+            rows, selected, args.raw_dir, args.rag_dir, args.date
+        )
+        print(f"캐시에서 원문 {len(rows)}건을 모았습니다(수집은 아직 진행 중일 수 있습니다).")
+        print(f"RAG 선별: {len(markdown_paths)}건")
+        print(f"JSON: {json_path}")
+        print(f"RAG:  {args.rag_dir}")
+        return 0
 
     api_key = os.environ.get(KEY_ENV_NAME, "").strip()
     if not api_key and sys.stdin.isatty():

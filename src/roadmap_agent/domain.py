@@ -19,6 +19,8 @@ class RoadmapRequest:
     risk_profile: RiskProfile
     age: int | None = None
     annual_income: int | None = None
+    previous_annual_income: int | None = None
+    current_annual_income: int | None = None
     monthly_take_home: int | None = None
     has_emergency_fund: bool = False
     max_investment_ratio: float | None = None
@@ -27,6 +29,8 @@ class RoadmapRequest:
     is_employed: bool | None = None
     is_sme_employee: bool | None = None
     household_size: int | None = None
+    household_monthly_income: int | None = None
+    financial_income_taxed: bool | None = None
     dependents: int | None = None
     is_married: bool | None = None
     question: str = ""
@@ -42,6 +46,10 @@ class RoadmapRequest:
             raise ValueError("age는 14~100이어야 합니다.")
         if self.annual_income is not None and self.annual_income < 0:
             raise ValueError("annual_income은 음수일 수 없습니다.")
+        if self.previous_annual_income is not None and self.previous_annual_income < 0:
+            raise ValueError("previous_annual_income은 음수일 수 없습니다.")
+        if self.current_annual_income is not None and self.current_annual_income < 0:
+            raise ValueError("current_annual_income은 음수일 수 없습니다.")
         if self.monthly_take_home is not None and self.monthly_take_home <= 0:
             raise ValueError("monthly_take_home은 0보다 커야 합니다.")
         if self.monthly_take_home is not None and self.monthly_budget > self.monthly_take_home:
@@ -50,6 +58,8 @@ class RoadmapRequest:
             raise ValueError("max_investment_ratio는 0~1이어야 합니다.")
         if self.household_size is not None and self.household_size < 1:
             raise ValueError("household_size는 1 이상이어야 합니다.")
+        if self.household_monthly_income is not None and self.household_monthly_income < 0:
+            raise ValueError("household_monthly_income은 음수일 수 없습니다.")
         if self.dependents is not None and self.dependents < 0:
             raise ValueError("dependents는 음수일 수 없습니다.")
 
@@ -60,6 +70,8 @@ class Evidence:
     source_url: str
     path: str
     score: int
+    content: str = ""
+    parent_content: str = ""
 
 
 @dataclass(frozen=True)
@@ -81,6 +93,7 @@ class Scenario:
     score: float | None = None
     evidence: list[Evidence] = field(default_factory=list)
     data_status: str = "ready"
+    monthly_limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +103,9 @@ class RoadmapResult:
     assumptions: dict[str, Any]
     disclaimer: str
     explanation: str | None = None
+    recommended_reason: str | None = None
+    alternative_reason: str | None = None
+    chat_reply: str | None = None
     status: str = "completed"
 
     def to_dict(self) -> dict[str, Any]:

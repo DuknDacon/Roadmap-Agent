@@ -30,6 +30,8 @@ class RiskAnswers:
 class IntakeRequest:
     birth_date: date | None = None
     annual_income: int | None = None
+    previous_annual_income: int | None = None
+    current_annual_income: int | None = None
     monthly_take_home: int | None = None
     region_province_code: str | None = None
     region_district_code: str | None = None
@@ -37,6 +39,8 @@ class IntakeRequest:
     is_employed: bool | None = None
     is_sme_employee: bool | None = None
     household_size: int | None = None
+    household_monthly_income: int | None = None
+    financial_income_taxed: bool | None = None
     dependents: int | None = None
     is_married: bool | None = None
     monthly_budget: int | None = None
@@ -95,6 +99,8 @@ class IntakeRequest:
             risk_profile=self.risk_answers.profile(),
             age=age,
             annual_income=self.annual_income,
+            previous_annual_income=self.previous_annual_income or self.annual_income,
+            current_annual_income=self.current_annual_income or self.annual_income,
             monthly_take_home=self.monthly_take_home,
             has_emergency_fund=self.has_emergency_fund,
             max_investment_ratio=self.risk_answers.maximum_investment_ratio,
@@ -103,6 +109,8 @@ class IntakeRequest:
             is_employed=self.is_employed,
             is_sme_employee=self.is_sme_employee,
             household_size=self.household_size,
+            household_monthly_income=self.household_monthly_income,
+            financial_income_taxed=self.financial_income_taxed,
             dependents=self.dependents,
             is_married=self.is_married,
         )

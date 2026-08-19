@@ -69,7 +69,9 @@ def score_scenario(scenario: Scenario, request: RoadmapRequest) -> float:
     )
     goal = min(goal_rate, 100)
     stability = {"savings": 95, "policy": 90, "balanced": 70, "investment": 35}[scenario.kind]
-    liquidity = {"investment": 80, "savings": 70, "balanced": 60, "policy": 40}[scenario.kind]
+    # 정책상품의 가입 상태는 별도 경고로 다룬다. 상품성 점수에서는
+    # 같은 목표기간의 적금보다 유동성이 과도하게 낮게 평가되지 않도록 한다.
+    liquidity = {"investment": 80, "savings": 70, "balanced": 60, "policy": 45}[scenario.kind]
     gain_ratio = max(comparison_amount - scenario.principal, 0) / max(scenario.principal, 1)
     expected_return = min(gain_ratio * 500, 100)
     policy = 100 if scenario.kind == "policy" else 0
@@ -173,7 +175,13 @@ def run_roadmap(
     result = finalize(request, scenarios)
     if explainer is not None:
         try:
-            result = replace(result, explanation=explainer.explain(request, result))
+            explanation = explainer.explain(request, result)
+            result = replace(
+                result,
+                recommended_reason=explanation.recommended_reason,
+                alternative_reason=explanation.alternative_reason,
+                chat_reply=explanation.chat_reply,
+            )
         except Exception as exc:
             result = replace(
                 result,
@@ -183,6 +191,69 @@ def run_roadmap(
                 },
             )
     return result
+
+
+def run_conversation(
+    request: RoadmapRequest,
+    result: RoadmapResult,
+    message: str,
+    *,
+    rag_root: Path | None = None,
+    policy_repository: PolicyRepository | None = None,
+    savings_repository: SavingsProductRepository | None = None,
+    retriever: RagRetriever | None = None,
+    explainer: RoadmapExplainer | None = None,
+    planner=None,
+    context: str = "",
+):
+    """기존 결과를 기준으로 요청에 필요한 도구만 실행하는 대화 진입점."""
+    from .conversation import execute_conversation
+
+    active_retriever = retriever or LocalRagRetriever(rag_root or _default_rag_root())
+    policies = policy_repository or EmptyPolicyRepository()
+    savings = savings_repository or EmptySavingsProductRepository()
+    return execute_conversation(
+        request,
+        result,
+        message,
+        run_roadmap_fn=run_roadmap,
+        policy_repository=policies,
+        savings_repository=savings,
+        retriever=active_retriever,
+        explainer=explainer,
+        planner=planner,
+        context=context,
+    )
+
+
+def build_conversation_graph(
+    rag_root: Path | None = None,
+    policy_repository: PolicyRepository | None = None,
+    savings_repository: SavingsProductRepository | None = None,
+    retriever: RagRetriever | None = None,
+    explainer: RoadmapExplainer | None = None,
+    planner=None,
+    checkpointer=None,
+    session_store=None,
+):
+    """Thread 체크포인터를 사용하는 기능 2 대화 그래프를 생성한다.
+
+    `checkpointer`/`session_store`를 지정하지 않으면 프로세스 메모리에만 남는
+    `MemorySaver`를 사용한다. 서버 재시작에도 대화 상태를 유지하고 일정 시간 뒤
+    자동으로 정리하려면 `SqliteConversationStore`를 만들어 `checkpointer`와
+    `session_store`에 각각 전달한다.
+    """
+    from .conversation_graph import RoadmapConversationGraph
+
+    return RoadmapConversationGraph(
+        policy_repository=policy_repository or EmptyPolicyRepository(),
+        savings_repository=savings_repository or EmptySavingsProductRepository(),
+        retriever=retriever or LocalRagRetriever(rag_root or _default_rag_root()),
+        explainer=explainer,
+        planner=planner,
+        checkpointer=checkpointer,
+        session_store=session_store,
+    )
 
 
 def build_langgraph(

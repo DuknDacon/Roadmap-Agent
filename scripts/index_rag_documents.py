@@ -3,55 +3,21 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 from pathlib import Path
 
 from roadmap_agent.config import load_env_file
 from roadmap_agent.gemini import GeminiEmbeddingClient
 from roadmap_agent.repositories import postgres_connection_factory_from_env
+from roadmap_agent.rag_chunking import chunk_markdown as semantic_chunk_markdown
 from roadmap_agent.retrieval import _metadata, _source_url
 
 
-HEADING_RE = re.compile(r"(?m)^#{1,6}\s+(.+?)\s*$")
-
-
 def chunk_markdown(text: str, *, maximum_chars: int = 1800) -> list[tuple[str, str]]:
-    """제목 경계를 우선 보존하고 긴 절만 문단 단위로 나눈다."""
-    matches = list(HEADING_RE.finditer(text))
-    sections: list[tuple[str, str]] = []
-    if not matches:
-        sections.append(("본문", text.strip()))
-    else:
-        prefix = text[: matches[0].start()].strip()
-        if prefix:
-            sections.append(("문서정보", prefix))
-        for index, match in enumerate(matches):
-            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-            sections.append((match.group(1).strip(), text[match.end() : end].strip()))
-
-    chunks: list[tuple[str, str]] = []
-    for heading, content in sections:
-        paragraphs = [item.strip() for item in re.split(r"\n\s*\n", content) if item.strip()]
-        current = ""
-        part = 1
-        for paragraph in paragraphs:
-            if current and len(current) + len(paragraph) + 2 > maximum_chars:
-                chunks.append((f"{heading}#{part}", current))
-                current = ""
-                part += 1
-            if len(paragraph) > maximum_chars:
-                if current:
-                    chunks.append((f"{heading}#{part}", current))
-                    current = ""
-                    part += 1
-                for start in range(0, len(paragraph), maximum_chars):
-                    chunks.append((f"{heading}#{part}", paragraph[start : start + maximum_chars]))
-                    part += 1
-            else:
-                current = f"{current}\n\n{paragraph}".strip()
-        if current:
-            chunks.append((f"{heading}#{part}", current))
-    return chunks
+    """기존 스크립트 호출부와 테스트를 위한 호환 래퍼."""
+    return [
+        (chunk.section, chunk.content)
+        for chunk in semantic_chunk_markdown(text, maximum_chars=maximum_chars)
+    ]
 
 
 def collect_documents(root: Path) -> list[dict[str, str]]:
@@ -65,16 +31,22 @@ def collect_documents(root: Path) -> list[dict[str, str]]:
         source_type = relative.parts[0] if len(relative.parts) > 1 else "rag"
         title = _metadata(text, "title") or path.stem
         url = _source_url(text)
-        for section, content in chunk_markdown(text):
+        metadata_source_type = _metadata(text, "source_type") or source_type
+        for chunk in semantic_chunk_markdown(text, source_type=metadata_source_type):
+            content_hash = hashlib.sha256(
+                f"{chunk.content}\n{chunk.parent_content}".encode()
+            ).hexdigest()
             documents.append(
                 {
                     "source_type": source_type,
                     "source_id": source_id,
                     "title": title,
-                    "section": section,
-                    "content": content,
+                    "section": chunk.section,
+                    "content": chunk.content,
                     "source_url": url,
-                    "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+                    "parent_section": chunk.parent_section,
+                    "parent_content": chunk.parent_content,
+                    "content_hash": content_hash,
                 }
             )
     return documents
@@ -105,6 +77,23 @@ def index_documents(root: Path, *, batch_size: int = 20, force: bool = False) ->
                 (row["source_type"], row["source_id"], row["section"]): row["content_hash"]
                 for row in cursor.fetchall()
             }
+            desired_keys = {
+                (item["source_type"], item["source_id"], item["section"])
+                for item in documents
+            }
+            managed_documents = {(key[0], key[1]) for key in desired_keys}
+            stale_keys = {
+                key
+                for key in set(existing) - desired_keys
+                if (key[0], key[1]) in managed_documents
+            }
+            if stale_keys:
+                cursor.executemany(
+                    "DELETE FROM rag_documents "
+                    "WHERE source_type = %s AND source_id = %s AND section = %s",
+                    sorted(stale_keys),
+                )
+                connection.commit()
         pending = [
             item
             for item in documents
@@ -130,7 +119,11 @@ def index_documents(root: Path, *, batch_size: int = 20, force: bool = False) ->
                             item["section"],
                             item["content"],
                             item["source_url"],
-                            json.dumps({"content_hash": item["content_hash"]}),
+                            json.dumps({
+                                "content_hash": item["content_hash"],
+                                "parent_section": item["parent_section"],
+                                "parent_content": item["parent_content"],
+                            }, ensure_ascii=False),
                             vector_literal,
                         ),
                     )

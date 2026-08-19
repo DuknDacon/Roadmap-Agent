@@ -7,6 +7,13 @@ from .domain import Evidence, RoadmapRequest, RoadmapResult
 
 
 @dataclass(frozen=True)
+class RoadmapExplanation:
+    recommended_reason: str
+    alternative_reason: str
+    chat_reply: str | None = None
+
+
+@dataclass(frozen=True)
 class SavingsProduct:
     product_id: str
     company_name: str
@@ -36,6 +43,9 @@ class PolicyBenefit:
     application_open: bool | None = None
     support_rate: float | None = None
     preferential_support_rate: float | None = None
+    qualification_status: str = "confirmed"
+    benefit_tier: str = "standard"
+    missing_qualification_fields: tuple[str, ...] = ()
 
 
 class SavingsProductRepository(Protocol):
@@ -51,7 +61,11 @@ class RagRetriever(Protocol):
 
 
 class RoadmapExplainer(Protocol):
-    def explain(self, request: RoadmapRequest, result: RoadmapResult) -> str: ...
+    def explain(self, request: RoadmapRequest, result: RoadmapResult) -> RoadmapExplanation: ...
+
+
+class FinancialQaAnswerer(Protocol):
+    def answer_financial_question(self, question: str, evidence: list[Evidence]) -> str: ...
 
 
 class EmptySavingsProductRepository:

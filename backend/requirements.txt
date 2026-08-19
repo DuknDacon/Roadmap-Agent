@@ -1,0 +1,11 @@
+# 공용 가상환경(../../.venv, Roadmap-Agent 코어와 함께 씀)에 설치된 실제 버전으로 고정.
+fastapi==0.141.1
+uvicorn[standard]==0.52.2
+pydantic==2.13.4
+
+# Local development: this backend lives in the same repo as Roadmap-Agent and shares
+# one virtual environment with it (see "로컬 실행" in ../README.md). Install the
+# package itself into that shared venv with:
+#   pip install -e ..
+# Deployment: this backend and Roadmap-Agent are built into a single image by the
+# repo-root Dockerfile — see ../Dockerfile.

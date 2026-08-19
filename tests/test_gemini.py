@@ -1,8 +1,13 @@
 import unittest
 from types import SimpleNamespace
 
-from roadmap_agent.domain import RiskProfile, RoadmapRequest, RoadmapResult, Scenario
-from roadmap_agent.gemini import GeminiEmbeddingClient, GeminiRoadmapExplainer
+from roadmap_agent.domain import Evidence, RiskProfile, RoadmapRequest, RoadmapResult, Scenario
+from roadmap_agent.gemini import (
+    GeminiConversationPlanner,
+    GeminiEmbeddingClient,
+    GeminiRoadmapExplainer,
+)
+from roadmap_agent.conversation import ConversationIntent
 
 
 class FakeModels:
@@ -19,7 +24,13 @@ class FakeModels:
 
     def generate_content(self, **kwargs):
         self.generate_calls.append(kwargs)
-        return SimpleNamespace(text="월 80만 원 적립 시 목표에 조금 부족합니다.")
+        return SimpleNamespace(
+            text=(
+                '{"recommended_reason":"월 80만 원을 안정적으로 적립합니다.",'
+                '"alternative_reason":"대안은 예상액이 조금 낮습니다.",'
+                '"chat_reply":null}'
+            )
+        )
 
 
 class GeminiTest(unittest.TestCase):
@@ -33,7 +44,7 @@ class GeminiTest(unittest.TestCase):
         self.assertEqual(models.embed_calls[0]["config"].task_type, "RETRIEVAL_QUERY")
         self.assertEqual(models.embed_calls[1]["config"].task_type, "RETRIEVAL_DOCUMENT")
 
-    def test_explainer_returns_text_without_changing_result(self):
+    def test_explainer_returns_structured_reasons_without_changing_result(self):
         models = FakeModels()
         request = RoadmapRequest(800_000, 36, 30_000_000, RiskProfile.BALANCED)
         scenario = Scenario(
@@ -51,8 +62,120 @@ class GeminiTest(unittest.TestCase):
         result = RoadmapResult(scenario, [], {}, "참고용")
         explainer = GeminiRoadmapExplainer(client=SimpleNamespace(models=models))
 
-        self.assertIn("80만 원", explainer.explain(request, result))
+        explanation = explainer.explain(request, result)
+        self.assertIn("80만 원", explanation.recommended_reason)
+        self.assertIn("대안", explanation.alternative_reason)
+        self.assertIsNone(explanation.chat_reply)
         self.assertEqual(result.recommended.expected_base, 29_800_000)
+
+    def test_conversation_planner_returns_structured_whitelisted_plan(self):
+        class PlannerModels:
+            def __init__(self):
+                self.contents = None
+
+            def generate_content(self, **kwargs):
+                self.contents = kwargs["contents"]
+                return SimpleNamespace(text=(
+                    '{"intent":"condition_change","tools":["condition_parser",'
+                    '"roadmap_calculators","ranking"],"structured_changes":'
+                    '{"max_investment_ratio":0.1},"clarification_question":null}'
+                ))
+
+        models = PlannerModels()
+        planner = GeminiConversationPlanner(client=SimpleNamespace(models=models))
+        plan = planner.plan(
+            RoadmapRequest(800_000, 36, None, RiskProfile.BALANCED),
+            "월 80만 원인데 당분간 더 안전하게 가고 싶어 test@example.com",
+        )
+        self.assertEqual(plan.intent, ConversationIntent.CONDITION_CHANGE)
+        self.assertEqual(plan.structured_changes, {"max_investment_ratio": 0.1})
+        self.assertNotIn("80만 원", models.contents)
+        self.assertNotIn("test@example.com", models.contents)
+
+    def test_financial_qa_falls_back_to_grounded_official_web_search_and_caches(self):
+        class WebModels:
+            def __init__(self):
+                self.calls = []
+
+            def generate_content(self, **kwargs):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    return SimpleNamespace(
+                        text='{"answer":"내부 근거 부족","needs_web_search":true}'
+                    )
+                web = SimpleNamespace(
+                    domain="law.go.kr",
+                    title="국가법령정보센터",
+                    uri="https://www.law.go.kr/example",
+                )
+                metadata = SimpleNamespace(
+                    grounding_chunks=[SimpleNamespace(web=web)]
+                )
+                return SimpleNamespace(
+                    text="가입 자격은 가입 시점을 기준으로 확인합니다.",
+                    candidates=[SimpleNamespace(grounding_metadata=metadata)],
+                )
+
+        models = WebModels()
+        explainer = GeminiRoadmapExplainer(
+            client=SimpleNamespace(models=models), web_search_enabled=True
+        )
+        evidence = [Evidence("내부 문서", "", "doc", 1, "관련 규정이 부족합니다.")]
+
+        first = explainer.answer_financial_question("이직하면 어떻게 돼?", evidence)
+        second = explainer.answer_financial_question("이직하면 어떻게 돼?", evidence)
+
+        self.assertIn("가입 자격", first)
+        self.assertIn("국가법령정보센터", first)
+        self.assertEqual(first, second)
+        self.assertEqual(len(models.calls), 2)
+
+    def test_web_search_rejects_non_official_grounding_sources(self):
+        class WebModels:
+            def generate_content(self, **kwargs):
+                web = SimpleNamespace(
+                    domain="example-blog.test",
+                    title="개인 블로그",
+                    uri="https://example-blog.test/post",
+                )
+                return SimpleNamespace(
+                    text="확정적인 답변",
+                    candidates=[SimpleNamespace(grounding_metadata=SimpleNamespace(
+                        grounding_chunks=[SimpleNamespace(web=web)]
+                    ))],
+                )
+
+        explainer = GeminiRoadmapExplainer(
+            client=SimpleNamespace(models=WebModels()), web_search_enabled=True
+        )
+        answer = explainer.answer_financial_question("최신 정책은?", [])
+
+        self.assertIn("공식 웹 출처", answer)
+        self.assertNotIn("확정적인 답변", answer)
+
+    def test_failed_web_search_preserves_partial_rag_answer(self):
+        class Models:
+            def __init__(self):
+                self.calls = 0
+
+            def generate_content(self, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return SimpleNamespace(text=(
+                        '{"answer":"비과세 가입요건은 가입일 직전 과세기간 기준입니다.",'
+                        '"needs_web_search":true}'
+                    ))
+                return SimpleNamespace(text="", candidates=[])
+
+        explainer = GeminiRoadmapExplainer(
+            client=SimpleNamespace(models=Models()), web_search_enabled=True
+        )
+        evidence = [Evidence("청년미래적금 법률", "", "law", 10, "가입일 직전 과세기간")]
+
+        answer = explainer.answer_financial_question("대기업으로 이직하면?", evidence)
+
+        self.assertIn("가입일 직전 과세기간", answer)
+        self.assertIn("정부기여금 변경 여부는 확정할 수 없습니다", answer)
 
 
 if __name__ == "__main__":

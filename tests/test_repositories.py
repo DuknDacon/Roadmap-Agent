@@ -77,6 +77,87 @@ class RepositoriesTest(unittest.TestCase):
         self.assertIn("신청기간은 종료", policy.reason)
         self.assertIn("중위소득", policy.reason)
         self.assertIn("은행이자 미포함", policy.reason)
+        self.assertEqual(policy.qualification_status, "needs_input")
+        self.assertEqual(policy.benefit_tier, "standard")
+        self.assertEqual(
+            policy.missing_qualification_fields,
+            ("household_monthly_income", "financial_income_taxed", "is_sme_employee"),
+        )
+
+    def test_preferential_rate_is_not_confirmed_from_sme_flag_alone(self):
+        request = RoadmapRequest(
+            **{
+                **self.request.__dict__,
+                "household_size": 1,
+                "household_monthly_income": 3_000_000,
+                "financial_income_taxed": False,
+                "is_sme_employee": True,
+            }
+        )
+        policy = map_youth_policy_row(
+            {
+                "plcyNo": "P3", "plcyNm": "청년미래적금",
+                "plcyExplnCn": "3년 만기, 월 50만원 한도",
+                "plcySprtCn": "일반형 6%, 우대형 12% 정부기여금 지원",
+                "earnEtcCn": "가구 중위소득 200% 이하",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+
+        assert policy is not None
+        self.assertEqual(policy.qualification_status, "needs_verification")
+        self.assertEqual(policy.benefit_tier, "preferential_possible")
+        self.assertEqual(policy.missing_qualification_fields, ())
+        self.assertIn("5,128,476원 이하", policy.reason)
+
+    def test_median_income_limit_uses_year_and_household_size(self):
+        request = RoadmapRequest(
+            **{
+                **self.request.__dict__,
+                "household_size": 1,
+                "household_monthly_income": 5_200_000,
+                "financial_income_taxed": False,
+                "is_sme_employee": False,
+            }
+        )
+        policy = map_youth_policy_row(
+            {
+                "plcyNo": "P5", "plcyNm": "청년미래적금",
+                "plcyExplnCn": "3년 만기, 월 50만원 한도",
+                "plcySprtCn": "일반형 6%, 우대형 12% 정부기여금 지원",
+                "earnEtcCn": "가구 중위소득 200% 이하",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+
+        assert policy is not None
+        self.assertFalse(policy.eligible)
+        self.assertEqual(policy.qualification_status, "ineligible")
+        self.assertIn("5,128,476원을 초과", policy.reason)
+
+    def test_financial_income_tax_history_marks_policy_ineligible(self):
+        request = RoadmapRequest(
+            **{
+                **self.request.__dict__,
+                "financial_income_taxed": True,
+                "is_sme_employee": False,
+            }
+        )
+        policy = map_youth_policy_row(
+            {
+                "plcyNo": "P4", "plcyNm": "청년미래적금",
+                "plcyExplnCn": "3년 만기, 월 50만원 한도",
+                "plcySprtCn": "일반형 6%, 우대형 12% 정부기여금 지원",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+
+        assert policy is not None
+        self.assertFalse(policy.eligible)
+        self.assertEqual(policy.qualification_status, "ineligible")
 
     def test_welfare_income_condition_is_not_assumed_eligible(self):
         policy = map_welfare_policy_row(

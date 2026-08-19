@@ -7,6 +7,8 @@ from datetime import date, datetime
 from typing import Any
 
 from .domain import RoadmapRequest
+from .policy_qualification import effective_household_monthly_income, median_income_limit
+from .policy_rules import PolicyRuleCatalog
 from .ports import PolicyBenefit, SavingsProduct
 
 
@@ -146,6 +148,7 @@ def map_youth_policy_row(
         return None
 
     reasons: list[str] = []
+    missing_fields: list[str] = []
     eligible = True
     min_age = _number(row.get("sprtTrgtMinAge")) or 0
     max_age = _number(row.get("sprtTrgtMaxAge")) or 0
@@ -160,15 +163,24 @@ def map_youth_policy_row(
             reasons.append(f"연령조건 {min_age}~{max_age}세 충족")
 
     max_income = _number(row.get("earnMaxAmt")) or 0
+    taxable_income = request.previous_annual_income or request.annual_income
     if max_income:
-        if request.annual_income is None:
+        if taxable_income is None:
             eligible = False
-            reasons.append("연소득 확인 필요")
-        elif request.annual_income > max_income * 10_000:
+            reasons.append("직전년도 과세소득 확인 필요")
+        elif taxable_income > max_income * 10_000:
             eligible = False
-            reasons.append("연소득 상한 초과")
+            reasons.append("직전년도 과세소득 상한 초과")
         else:
-            reasons.append("연소득 기본조건 충족")
+            reasons.append("직전년도 과세소득 기본조건 충족")
+
+    if (
+        request.previous_annual_income is not None
+        and request.current_annual_income is not None
+    ):
+        change = abs(request.current_annual_income - request.previous_annual_income)
+        if change / max(request.previous_annual_income, 1) >= 0.2:
+            reasons.append("현재 예상소득 변동폭이 커 기준연도별 자격 재확인 필요")
 
     zip_codes = {value.strip() for value in str(row.get("zipCd") or "").split(",") if value.strip()}
     if zip_codes and request.region_code:
@@ -182,19 +194,72 @@ def map_youth_policy_row(
         reasons.append("현재 확인된 신청기간은 종료됨")
     income_text = str(row.get("earnEtcCn") or "")
     if "중위소득" in income_text:
-        reasons.append("가구 중위소득 충족 여부 추가 확인 필요")
+        household_income = effective_household_monthly_income(request)
+        if household_income is None:
+            missing_fields.append("household_monthly_income")
+            reasons.append("가구 중위소득 판정을 위한 월소득 입력 필요")
+        elif request.household_size is None:
+            missing_fields.append("household_size")
+            reasons.append("가구 중위소득 판정을 위한 가구원 수 입력 필요")
+        else:
+            income_limit = median_income_limit(income_text, as_of.year, request.household_size)
+            if income_limit is None:
+                reasons.append("가구 중위소득 기준연도 또는 비율 확인 필요")
+            else:
+                ratio, limit = income_limit
+                if household_income > limit:
+                    eligible = False
+                    reasons.append(
+                        f"입력 월소득이 {as_of.year}년 {request.household_size}인 가구 "
+                        f"기준 중위소득 {ratio:.0%} 한도 {limit:,}원을 초과"
+                    )
+                else:
+                    reasons.append(
+                        f"입력 월소득 기준 {as_of.year}년 {request.household_size}인 가구 "
+                        f"기준 중위소득 {ratio:.0%} 한도 {limit:,}원 이하"
+                    )
+                    reasons.append("실제 심사는 운영기관의 소득인정 기준 재확인 필요")
     if (
         "금융소득" in text
         or "금융소득" in str(row.get("plcyAplyMthdCn") or "")
         or "미래적금" in str(row.get("plcyNm") or "")
     ):
-        reasons.append("금융소득종합과세 대상 여부 추가 확인 필요")
-    if request.is_sme_employee and "우대형" in text:
-        reasons.append("중소기업 재직자로 우대형 가능성이 있으나 세부 자격 확인 필요")
+        if request.financial_income_taxed is None:
+            missing_fields.append("financial_income_taxed")
+            reasons.append("금융소득종합과세 대상 여부 입력 필요")
+        elif request.financial_income_taxed:
+            eligible = False
+            reasons.append("금융소득종합과세 이력으로 과세특례 적용 제한")
+        else:
+            reasons.append("금융소득종합과세 제한조건 충족")
+    benefit_tier = "standard"
+    if "우대형" in text:
+        if request.is_sme_employee is None:
+            missing_fields.append("is_sme_employee")
+            reasons.append("우대형 판정을 위한 중소기업 재직 여부 입력 필요")
+        elif request.is_sme_employee:
+            benefit_tier = "preferential_possible"
+            reasons.append("중소기업 재직조건 충족, 우대형 세부 자격 확인 필요")
+        else:
+            reasons.append("중소기업 재직조건 미충족으로 일반형 적용")
     if "금리" in text and ("자율 결정" in text or "자율결정" in text):
         reasons.append("취급 금융기관 금리 추가 정보 필요(현재 예상액에는 은행이자 미포함)")
     if row.get("addAplyQlfcCndCn") or row.get("ptcpPrpTrgtCn"):
         reasons.append("추가 자격조건은 운영기관 확인 필요")
+
+    missing_fields = list(dict.fromkeys(missing_fields))
+    needs_verification = any("확인 필요" in reason or "대조 필요" in reason for reason in reasons)
+    qualification_status = (
+        "ineligible"
+        if not eligible
+        else "needs_input"
+        if missing_fields
+        else "needs_verification"
+        if needs_verification
+        else "confirmed"
+    )
+    if benefit_tier == "preferential_possible" and qualification_status == "confirmed":
+        benefit_tier = "preferential"
 
     return PolicyBenefit(
         policy_id=str(row.get("plcyNo") or ""),
@@ -209,6 +274,9 @@ def map_youth_policy_row(
         application_open=application_open,
         support_rate=_support_rate(text),
         preferential_support_rate=_preferential_support_rate(text),
+        qualification_status=qualification_status,
+        benefit_tier=benefit_tier,
+        missing_qualification_fields=tuple(missing_fields),
     )
 
 
@@ -240,7 +308,13 @@ def map_welfare_policy_row(
             reasons.append(f"연령조건 {low}~{high}세 충족")
     if "중위소득" in target:
         eligible = False
-        reasons.append("가구소득 인정액·중위소득 비율 확인 필요")
+        if request.current_annual_income is None:
+            reasons.append("현재 근로소득과 가구소득 인정액·중위소득 비율 확인 필요")
+        else:
+            reasons.append(
+                f"현재 예상 근로소득 연 {request.current_annual_income:,}원 기준으로 "
+                "가구소득 인정액·중위소득 비율 추가 확인 필요"
+            )
     if any(term in target for term in ("북향민", "농업인", "어업인", "무주택")):
         eligible = False
         reasons.append("대상자 특수조건 확인 필요")
@@ -258,6 +332,7 @@ def map_welfare_policy_row(
         application_open=None,
         support_rate=_support_rate(benefit),
         preferential_support_rate=_preferential_support_rate(benefit),
+        qualification_status="confirmed" if eligible else "needs_verification",
     )
 
 
@@ -288,9 +363,16 @@ class PostgresSavingsProductRepository:
 
 
 class PostgresPolicyRepository:
-    def __init__(self, connection_factory: ConnectionFactory, *, as_of: date | None = None):
+    def __init__(
+        self,
+        connection_factory: ConnectionFactory,
+        *,
+        as_of: date | None = None,
+        rule_catalog: PolicyRuleCatalog | None = None,
+    ):
         self.connection_factory = connection_factory
         self.as_of = as_of or date.today()
+        self.rule_catalog = rule_catalog
 
     def find_candidates(self, request: RoadmapRequest) -> list[PolicyBenefit]:
         with self.connection_factory() as connection:
@@ -300,6 +382,8 @@ class PostgresPolicyRepository:
                 cursor.execute('SELECT * FROM raw.welfare_service_detail')
                 welfare = [map_welfare_policy_row(row, request, as_of=self.as_of) for row in cursor.fetchall()]
         candidates = [item for item in [*youth, *welfare] if item is not None]
+        if self.rule_catalog is not None:
+            candidates = [self.rule_catalog.apply(item, request) for item in candidates]
         unique: dict[str, PolicyBenefit] = {}
         for item in candidates:
             current = unique.get(item.name)
