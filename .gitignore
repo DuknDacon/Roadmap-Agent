@@ -19,3 +19,4 @@ backend/app/.data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+.mcp.json

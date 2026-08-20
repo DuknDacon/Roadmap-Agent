@@ -28,7 +28,13 @@ NEXT_PUBLIC_ROADMAP_API_URL=http://localhost:8001 npm run dev
 
 The API always uses Roadmap-Agent's deterministic calculations. It uses local evidence by default.
 
-At startup, the backend loads server-only settings from the repo-root `.env` and then `backend/.env`. Browser code never receives these values.
+At startup, the backend loads server-only settings from the repo-root `.env` first, then
+`backend/.env` if one exists (values already set by the root `.env` win). For local
+development, the repo-root `.env` alone is enough — see `../.env.example` for the
+`CORS_ORIGINS`/`ENABLE_VECTOR_RAG` keys backend-specifically reads. A separate
+`backend/.env` only matters for deployment, where the server gets a minimal, scoped
+env file instead of the full repo-root one (see `.env.example` in this folder and the
+"배포 (Docker)" section in `../README.md`). Browser code never receives these values.
 
 - Set the `POSTGRES_*` variables to use structured savings and policy repositories.
 - Set `ENABLE_VECTOR_RAG=true` with PostgreSQL and `GEMINI_API_KEY` to use pgvector retrieval.
