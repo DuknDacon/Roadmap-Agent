@@ -1,0 +1,59 @@
+# 로컬 소스에서 직접 빌드하는 통합 실행용 compose 파일.
+# 메일로 받은 tar 이미지(roadmap-agent-postgres-seed:v1, seedup-roadmap-backend:v1)
+# 대신, 이 레포의 Dockerfile 두 개로 같은 이미지를 만들어서 올린다.
+#
+# 실행:
+#   docker compose -f docker-compose.roadmap.yml up -d --build
+# 종료:
+#   docker compose -f docker-compose.roadmap.yml down
+# 시드 다시 적재하고 싶으면 (볼륨 초기화):
+#   docker compose -f docker-compose.roadmap.yml down -v
+
+services:
+  postgres:
+    # db/postgres-seed.Dockerfile: pgvector/pg16 + db/init/001_schema.sql + db/seed/sample_data.sql
+    build:
+      context: .
+      dockerfile: db/postgres-seed.Dockerfile
+    image: roadmap-agent-postgres-seed:v1
+    container_name: roadmap-agent-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-roadmap_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-roadmap_agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - roadmap_agent_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    # 루트 Dockerfile: Roadmap-Agent 라이브러리 + backend/app (FastAPI, uvicorn :8001)
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: seedup-roadmap-backend:v1
+    container_name: roadmap-agent-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # compose 네트워크 안에서는 서비스 이름으로 붙어야 한다.
+      # .env 의 POSTGRES_HOST=localhost 를 여기서 덮어쓴다.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  roadmap_agent_postgres:
