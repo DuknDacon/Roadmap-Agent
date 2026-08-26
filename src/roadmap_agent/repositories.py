@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 from collections.abc import Callable, Mapping
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from .domain import RoadmapRequest
@@ -336,7 +338,7 @@ def map_welfare_policy_row(
     )
 
 
-class PostgresSavingsProductRepository:
+class SqliteSavingsProductRepository:
     def __init__(self, connection_factory: ConnectionFactory):
         self.connection_factory = connection_factory
 
@@ -345,24 +347,24 @@ class PostgresSavingsProductRepository:
             SELECT b.dcls_month, b.fin_co_no, b.fin_prdt_cd, b.kor_co_nm,
                    b.fin_prdt_nm, b.etc_note, b.dcls_strt_day, b.source_url,
                    o.intr_rate_type, o.rsrv_type, o.save_trm, o.intr_rate, o.intr_rate2
-              FROM raw.finlife_saving_base b
-              JOIN raw.finlife_saving_option o
+              FROM finlife_saving_base b
+              JOIN finlife_saving_option o
                 USING (dcls_month, fin_co_no, fin_prdt_cd)
              WHERE o.intr_rate IS NOT NULL
                AND o.intr_rate_type = 'S'
-               AND o.save_trm ~ '^[0-9]+$'
-               AND o.save_trm::integer <= %s
-             ORDER BY o.save_trm::integer DESC, o.intr_rate2 DESC NULLS LAST,
+               AND o.save_trm NOT GLOB '*[^0-9]*'
+               AND CAST(o.save_trm AS INTEGER) <= ?
+             ORDER BY CAST(o.save_trm AS INTEGER) DESC,
+                      o.intr_rate2 IS NULL, o.intr_rate2 DESC,
                       o.intr_rate DESC, b.fin_prdt_nm
         """
         with self.connection_factory() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(query, (request.horizon_months,))
-                products = [map_savings_row(row) for row in cursor.fetchall()]
+            rows = connection.execute(query, (request.horizon_months,)).fetchall()
+            products = [map_savings_row(dict(row)) for row in rows]
         return [product for product in products if product is not None]
 
 
-class PostgresPolicyRepository:
+class SqlitePolicyRepository:
     def __init__(
         self,
         connection_factory: ConnectionFactory,
@@ -376,11 +378,19 @@ class PostgresPolicyRepository:
 
     def find_candidates(self, request: RoadmapRequest) -> list[PolicyBenefit]:
         with self.connection_factory() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute('SELECT * FROM raw.youth_policy WHERE "plcyAprvSttsCd" = %s', ("0044002",))
-                youth = [map_youth_policy_row(row, request, as_of=self.as_of) for row in cursor.fetchall()]
-                cursor.execute('SELECT * FROM raw.welfare_service_detail')
-                welfare = [map_welfare_policy_row(row, request, as_of=self.as_of) for row in cursor.fetchall()]
+            youth_rows = connection.execute(
+                'SELECT * FROM youth_policy WHERE "plcyAprvSttsCd" = ?',
+                ("0044002",),
+            ).fetchall()
+            youth = [
+                map_youth_policy_row(dict(row), request, as_of=self.as_of)
+                for row in youth_rows
+            ]
+            welfare_rows = connection.execute("SELECT * FROM welfare_service_detail").fetchall()
+            welfare = [
+                map_welfare_policy_row(dict(row), request, as_of=self.as_of)
+                for row in welfare_rows
+            ]
         candidates = [item for item in [*youth, *welfare] if item is not None]
         if self.rule_catalog is not None:
             candidates = [self.rule_catalog.apply(item, request) for item in candidates]
@@ -395,26 +405,29 @@ class PostgresPolicyRepository:
         return sorted(unique.values(), key=lambda item: (not item.eligible, -item.estimated_support, item.name))
 
 
-def postgres_connection_factory_from_env() -> ConnectionFactory:
-    """환경변수로 psycopg 연결 팩토리를 만든다. 비밀번호는 로그에 출력하지 않는다."""
-    required = ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD")
-    missing = [name for name in required if not os.environ.get(name)]
-    if missing:
-        raise RuntimeError("PostgreSQL 환경변수 누락: " + ", ".join(missing))
+def sqlite_connection_factory(path: str | Path) -> ConnectionFactory:
+    """공용 SQLite 파일용 연결 팩토리.
+
+    기능 1은 같은 파일을 읽고 기능 2는 상품 조회와 대화 체크포인트 쓰기를 함께
+    수행한다. WAL과 busy timeout을 모든 기능 2 연결에 적용해 짧은 동시 읽기/쓰기
+    충돌을 기다렸다가 재시도하도록 한다.
+    """
+    db_path = Path(path).expanduser().resolve()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def connect() -> Any:
-        try:
-            import psycopg
-            from psycopg.rows import dict_row
-        except ImportError as exc:
-            raise RuntimeError("PostgreSQL 연결에는 psycopg 패키지가 필요합니다.") from exc
-        return psycopg.connect(
-            dbname=os.environ["POSTGRES_DB"],
-            user=os.environ["POSTGRES_USER"],
-            password=os.environ["POSTGRES_PASSWORD"],
-            host=os.environ.get("POSTGRES_HOST", "localhost"),
-            port=os.environ.get("POSTGRES_PORT", "5432"),
-            row_factory=dict_row,
-        )
+        connection = sqlite3.connect(str(db_path), timeout=30)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA busy_timeout=30000")
+        connection.execute("PRAGMA foreign_keys=ON")
+        return connection
 
     return connect
+
+
+def sqlite_connection_factory_from_env() -> ConnectionFactory:
+    path = os.getenv("SHARED_DB_PATH")
+    if not path:
+        raise RuntimeError("SHARED_DB_PATH 환경변수가 필요합니다.")
+    return sqlite_connection_factory(path)

@@ -6,14 +6,14 @@ from pathlib import Path
 
 from .config import load_env_file
 from .domain import RiskProfile, RoadmapRequest
-from .gemini import GeminiEmbeddingClient, GeminiRoadmapExplainer
+from .gemini import GeminiRoadmapExplainer
 from .orchestrator import run_roadmap
 from .repositories import (
-    PostgresPolicyRepository,
-    PostgresSavingsProductRepository,
-    postgres_connection_factory_from_env,
+    SqlitePolicyRepository,
+    SqliteSavingsProductRepository,
+    sqlite_connection_factory_from_env,
 )
-from .retrieval import FallbackRagRetriever, LocalRagRetriever, PostgresVectorRagRetriever
+from .retrieval import LocalRagRetriever
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,8 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--has-emergency-fund", action="store_true")
     parser.add_argument("--question", default="")
     parser.add_argument("--region-code", help="시도:시군구 코드, 예: 11:11110")
-    parser.add_argument("--postgres", action="store_true", help="로컬 PostgreSQL 실데이터 사용")
-    parser.add_argument("--vector-rag", action="store_true", help="Gemini 임베딩과 pgvector 검색 사용")
+    parser.add_argument("--sqlite", action="store_true", help="SHARED_DB_PATH 공용 SQLite 사용")
+    parser.add_argument("--rag", action="store_true", help="공식 문서 로컬 RAG 검색 사용")
     parser.add_argument("--gemini", action="store_true", help="Gemini로 최종 사용자 설명 생성")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     return parser
@@ -51,20 +51,14 @@ def main() -> int:
     policy_repository = None
     retriever = None
     explainer = None
-    if args.postgres or args.vector_rag or args.gemini:
+    if args.sqlite or args.rag or args.gemini:
         load_env_file(args.env_file)
-    if args.postgres:
-        factory = postgres_connection_factory_from_env()
-        savings_repository = PostgresSavingsProductRepository(factory)
-        policy_repository = PostgresPolicyRepository(factory)
-    if args.vector_rag:
-        if not args.postgres:
-            raise SystemExit("--vector-rag는 --postgres와 함께 사용해야 합니다.")
-        local = LocalRagRetriever(Path(__file__).resolve().parents[2] / "data" / "rag")
-        retriever = FallbackRagRetriever(
-            PostgresVectorRagRetriever(factory, GeminiEmbeddingClient()),
-            local,
-        )
+    if args.sqlite:
+        factory = sqlite_connection_factory_from_env()
+        savings_repository = SqliteSavingsProductRepository(factory)
+        policy_repository = SqlitePolicyRepository(factory)
+    if args.rag:
+        retriever = LocalRagRetriever(Path(__file__).resolve().parents[2] / "data" / "rag")
     if args.gemini:
         explainer = GeminiRoadmapExplainer()
     print(

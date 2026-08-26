@@ -39,7 +39,7 @@ class GeminiEmbeddingClient:
         self.model = model or os.environ.get("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
         self.dimensions = dimensions or int(os.environ.get("GEMINI_EMBEDDING_DIMENSION", "1536"))
         if self.dimensions != 1536:
-            raise ValueError("현재 rag_documents.embedding 스키마는 1536차원만 지원합니다.")
+            raise ValueError("현재 기능 2 FAISS 인덱스는 1536차원만 지원합니다.")
         if client is None:
             key = api_key or os.environ.get("GEMINI_API_KEY")
             if not key:

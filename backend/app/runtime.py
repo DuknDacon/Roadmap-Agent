@@ -20,15 +20,11 @@ from roadmap_agent.ports import (
     SavingsProductRepository,
 )
 from roadmap_agent.repositories import (
-    PostgresPolicyRepository,
-    PostgresSavingsProductRepository,
-    postgres_connection_factory_from_env,
+    SqlitePolicyRepository,
+    SqliteSavingsProductRepository,
+    sqlite_connection_factory_from_env,
 )
-from roadmap_agent.retrieval import (
-    FallbackRagRetriever,
-    LocalRagRetriever,
-    PostgresVectorRagRetriever,
-)
+from roadmap_agent.retrieval import FallbackRagRetriever, HybridRagRetriever, LocalRagRetriever
 
 
 def _enabled(name: str) -> bool:
@@ -55,24 +51,29 @@ class Runtime:
 @lru_cache(maxsize=1)
 def get_runtime() -> Runtime:
     agent_root = _load_server_environment()
-    factory = None
     policies = None
     savings = None
     retriever = None
     explainer = None
     planner = None
 
-    if all(os.getenv(name) for name in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD")):
-        factory = postgres_connection_factory_from_env()
-        policies = PostgresPolicyRepository(factory)
-        savings = PostgresSavingsProductRepository(factory)
+    shared_db_path = os.getenv("SHARED_DB_PATH")
+    if shared_db_path:
+        factory = sqlite_connection_factory_from_env()
+        policies = SqlitePolicyRepository(factory)
+        savings = SqliteSavingsProductRepository(factory)
 
-    if _enabled("ENABLE_VECTOR_RAG") and factory is not None:
+    if _enabled("ENABLE_RAG") or _enabled("ENABLE_VECTOR_RAG"):
         rag_root = agent_root / "data" / "rag"
-        retriever = FallbackRagRetriever(
-            PostgresVectorRagRetriever(factory, GeminiEmbeddingClient()),
-            LocalRagRetriever(rag_root),
-        )
+        local_retriever = LocalRagRetriever(rag_root)
+        index_dir = Path(os.getenv("RAG_INDEX_DIR", agent_root / "data" / "rag_index"))
+        try:
+            retriever = FallbackRagRetriever(
+                HybridRagRetriever(index_dir, GeminiEmbeddingClient()),
+                local_retriever,
+            )
+        except (FileNotFoundError, RuntimeError):
+            retriever = local_retriever
 
     if _enabled("ENABLE_GEMINI"):
         explainer = GeminiRoadmapExplainer(
@@ -88,7 +89,9 @@ def get_runtime() -> Runtime:
     if _enabled("ENABLE_GEMINI_PLANNER"):
         planner = GeminiConversationPlanner()
 
-    default_store_path = Path(__file__).resolve().parent / ".data" / "conversations.sqlite"
+    default_store_path = shared_db_path or (
+        Path(__file__).resolve().parent / ".data" / "conversations.sqlite"
+    )
     store_path = os.getenv("CONVERSATION_STORE_PATH", str(default_store_path))
     ttl_seconds = int(os.getenv("CONVERSATION_TTL_SECONDS", str(DEFAULT_TTL_SECONDS)))
     conversation_store = SqliteConversationStore(store_path, ttl_seconds=ttl_seconds)

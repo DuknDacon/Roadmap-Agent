@@ -9,8 +9,7 @@ __pycache__/
 data/raw/*.json
 data/raw/.fss_finance_tips_cache/
 data/fixtures/*.json
-data/rag/finance_tips/*.md
-
+data/rag/
 # Docker 이미지 파일 (scp 등으로 서버에 직접 전달, git에는 올리지 않음)
 *.tar
 

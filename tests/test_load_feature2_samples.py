@@ -32,8 +32,8 @@ class LoadFeature2SamplesTest(unittest.TestCase):
 
         sql = "\n".join(MODULE.build_finlife_sql(document))
 
-        self.assertIn("raw.finlife_saving_base", sql)
-        self.assertIn("raw.finlife_saving_option", sql)
+        self.assertIn("finlife_saving_base", sql)
+        self.assertIn("finlife_saving_option", sql)
         self.assertIn("ON CONFLICT", sql)
 
     def test_youth_uses_official_url_fallback_and_skips_unapproved(self):

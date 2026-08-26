@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 from pathlib import Path
 
 from roadmap_agent.config import load_env_file
 from roadmap_agent.gemini import GeminiEmbeddingClient
-from roadmap_agent.repositories import postgres_connection_factory_from_env
 from roadmap_agent.rag_chunking import chunk_markdown as semantic_chunk_markdown
-from roadmap_agent.retrieval import _metadata, _source_url
+from roadmap_agent.retrieval import HybridRagRetriever, _metadata, _source_url
 
 
 def chunk_markdown(text: str, *, maximum_chars: int = 1800) -> list[tuple[str, str]]:
@@ -52,94 +50,36 @@ def collect_documents(root: Path) -> list[dict[str, str]]:
     return documents
 
 
-def index_documents(root: Path, *, batch_size: int = 20, force: bool = False) -> tuple[int, int]:
+def index_documents(
+    root: Path,
+    *,
+    index_dir: Path = Path("data/rag_index"),
+    batch_size: int = 20,
+    force: bool = False,
+) -> tuple[int, int]:
+    del force
     documents = collect_documents(root)
-    connect = postgres_connection_factory_from_env()
-    sql = """
-        INSERT INTO rag_documents
-            (source_type, source_id, title, section, content, source_url, metadata, embedding)
-        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::vector)
-        ON CONFLICT (source_type, source_id, section) DO UPDATE SET
-            title = EXCLUDED.title,
-            content = EXCLUDED.content,
-            source_url = EXCLUDED.source_url,
-            metadata = EXCLUDED.metadata,
-            embedding = EXCLUDED.embedding,
-            created_at = now()
-    """
-    with connect() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT source_type, source_id, section, metadata->>'content_hash' AS content_hash "
-                "FROM rag_documents"
-            )
-            existing = {
-                (row["source_type"], row["source_id"], row["section"]): row["content_hash"]
-                for row in cursor.fetchall()
-            }
-            desired_keys = {
-                (item["source_type"], item["source_id"], item["section"])
-                for item in documents
-            }
-            managed_documents = {(key[0], key[1]) for key in desired_keys}
-            stale_keys = {
-                key
-                for key in set(existing) - desired_keys
-                if (key[0], key[1]) in managed_documents
-            }
-            if stale_keys:
-                cursor.executemany(
-                    "DELETE FROM rag_documents "
-                    "WHERE source_type = %s AND source_id = %s AND section = %s",
-                    sorted(stale_keys),
-                )
-                connection.commit()
-        pending = [
-            item
-            for item in documents
-            if force
-            or existing.get((item["source_type"], item["source_id"], item["section"]))
-            != item["content_hash"]
-        ]
-        if not pending:
-            return len(documents), 0
-        embedder = GeminiEmbeddingClient()
-        for start in range(0, len(pending), batch_size):
-            batch = pending[start : start + batch_size]
-            vectors = embedder.embed_documents([item["content"] for item in batch])
-            with connection.cursor() as cursor:
-                for item, vector in zip(batch, vectors, strict=True):
-                    vector_literal = "[" + ",".join(format(value, ".9g") for value in vector) + "]"
-                    cursor.execute(
-                        sql,
-                        (
-                            item["source_type"],
-                            item["source_id"],
-                            item["title"],
-                            item["section"],
-                            item["content"],
-                            item["source_url"],
-                            json.dumps({
-                                "content_hash": item["content_hash"],
-                                "parent_section": item["parent_section"],
-                                "parent_content": item["parent_content"],
-                            }, ensure_ascii=False),
-                            vector_literal,
-                        ),
-                    )
-            connection.commit()
-    return len(documents), len(pending)
+    HybridRagRetriever.build(
+        root, index_dir, GeminiEmbeddingClient(), batch_size=batch_size
+    )
+    return len(documents), len(documents)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="공식 Markdown을 Gemini로 임베딩해 pgvector에 적재")
+    parser = argparse.ArgumentParser(description="공식 Markdown으로 FAISS+BM25 인덱스 생성")
     parser.add_argument("--rag-root", type=Path, default=Path("data/rag"))
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument("--index-dir", type=Path, default=Path("data/rag_index"))
     parser.add_argument("--batch-size", type=int, default=20)
     parser.add_argument("--force", action="store_true", help="변경 여부와 무관하게 전체 재임베딩")
     args = parser.parse_args()
     load_env_file(args.env_file)
-    total, embedded = index_documents(args.rag_root, batch_size=args.batch_size, force=args.force)
+    total, embedded = index_documents(
+        args.rag_root,
+        index_dir=args.index_dir,
+        batch_size=args.batch_size,
+        force=args.force,
+    )
     print(f"RAG 청크 총 {total}건, 신규·변경 {embedded}건 임베딩 완료")
     return 0
 

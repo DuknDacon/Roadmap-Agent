@@ -1,8 +1,17 @@
 import unittest
+import sqlite3
+import tempfile
 from datetime import date
+from pathlib import Path
 
 from roadmap_agent.domain import RiskProfile, RoadmapRequest
-from roadmap_agent.repositories import map_savings_row, map_welfare_policy_row, map_youth_policy_row
+from roadmap_agent.repositories import (
+    SqliteSavingsProductRepository,
+    map_savings_row,
+    map_welfare_policy_row,
+    map_youth_policy_row,
+    sqlite_connection_factory,
+)
 
 
 class RepositoriesTest(unittest.TestCase):
@@ -33,6 +42,30 @@ class RepositoriesTest(unittest.TestCase):
         self.assertEqual(product.annual_base_rate, 0.024)
         self.assertEqual(product.savings_type_name, "자유적립식")
         self.assertEqual(product.interest_type_name, "단리")
+
+    def test_sqlite_repository_reads_shared_schema(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "seedup.sqlite"
+            connection = sqlite3.connect(path)
+            connection.executescript(
+                "CREATE TABLE finlife_saving_base (dcls_month TEXT, fin_co_no TEXT, "
+                "fin_prdt_cd TEXT, kor_co_nm TEXT, fin_prdt_nm TEXT, etc_note TEXT, "
+                "dcls_strt_day TEXT, source_url TEXT);"
+                "CREATE TABLE finlife_saving_option (dcls_month TEXT, fin_co_no TEXT, "
+                "fin_prdt_cd TEXT, intr_rate_type TEXT, intr_rate_type_nm TEXT, "
+                "rsrv_type TEXT, rsrv_type_nm TEXT, save_trm TEXT, intr_rate REAL, "
+                "intr_rate2 REAL);"
+                "INSERT INTO finlife_saving_base VALUES "
+                "('202608','001','A','테스트은행','공용적금','월 50만원','20260801','https://example.test');"
+                "INSERT INTO finlife_saving_option VALUES "
+                "('202608','001','A','S','단리','F','자유적립식','36',2.5,3.5);"
+            )
+            connection.commit()
+            connection.close()
+            repository = SqliteSavingsProductRepository(sqlite_connection_factory(path))
+            products = repository.find_candidates(self.request)
+            self.assertEqual(len(products), 1)
+            self.assertEqual(products[0].product_name, "공용적금")
 
     def test_youth_policy_uses_only_explicit_support_formula(self):
         policy = map_youth_policy_row(

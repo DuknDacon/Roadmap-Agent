@@ -45,7 +45,10 @@ class SqliteConversationStore:
     def __init__(self, path: str | Path, *, ttl_seconds: int = DEFAULT_TTL_SECONDS):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.ttl_seconds = ttl_seconds
-        conn = sqlite3.connect(str(path), check_same_thread=False)
+        conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA foreign_keys=ON")
         # `.with_msgpack_allowlist(...)`는 이미 제한된 허용목록에 항목을 더할 때만
         # 동작하고, 기본값인 permissive(True) 상태에서는 그대로 반환해 버리므로
         # 허용목록을 생성자에서 바로 지정한다.

@@ -20,15 +20,15 @@ from roadmap_agent.gemini import GeminiEmbeddingClient, GeminiRoadmapExplainer
 from roadmap_agent.intake import IntakeRequest, RiskAnswers
 from roadmap_agent.orchestrator import run_roadmap
 from roadmap_agent.repositories import (
-    PostgresPolicyRepository,
-    PostgresSavingsProductRepository,
-    postgres_connection_factory_from_env,
+    SqlitePolicyRepository,
+    SqliteSavingsProductRepository,
+    sqlite_connection_factory_from_env,
 )
 from roadmap_agent.region_codes import load_region_codes
 from roadmap_agent.retrieval import (
     FallbackRagRetriever,
+    HybridRagRetriever,
     LocalRagRetriever,
-    PostgresVectorRagRetriever,
 )
 from roadmap_agent.ui_state import apply_conversation_change
 
@@ -194,24 +194,21 @@ def run_agent(request: RoadmapRequest, use_vector: bool, use_gemini: bool):
     savings_repository = None
     retriever = None
     explainer = None
-    factory = None
     try:
-        factory = postgres_connection_factory_from_env()
-        policy_repository = PostgresPolicyRepository(factory)
-        savings_repository = PostgresSavingsProductRepository(factory)
+        factory = sqlite_connection_factory_from_env()
+        policy_repository = SqlitePolicyRepository(factory)
+        savings_repository = SqliteSavingsProductRepository(factory)
     except Exception as exc:
-        warnings.append(f"PostgreSQL 연결 없이 폴백 계산을 사용합니다: {type(exc).__name__}")
+        warnings.append(f"공용 SQLite 연결 없이 폴백 계산을 사용합니다: {type(exc).__name__}")
 
-    if use_vector and factory is not None:
+    if use_vector:
         try:
             local = LocalRagRetriever(ROOT / "data" / "rag")
             retriever = FallbackRagRetriever(
-                PostgresVectorRagRetriever(factory, GeminiEmbeddingClient()), local
+                HybridRagRetriever(ROOT / "data" / "rag_index", GeminiEmbeddingClient()), local
             )
         except Exception as exc:
             warnings.append(f"벡터 검색 준비 실패로 로컬 검색을 사용합니다: {type(exc).__name__}")
-    elif use_vector:
-        warnings.append("AI 의미 검색을 요청했지만 PostgreSQL 연결이 없어 로컬 검색을 사용합니다.")
     if use_gemini:
         try:
             explainer = GeminiRoadmapExplainer()

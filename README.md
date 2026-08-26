@@ -24,10 +24,10 @@ src/roadmap_agent/
   domain.py               요청·결과 모델
   calculators.py          결정론적 계산 함수
   agents.py               품목별 시나리오 노드
-  repositories.py         PostgreSQL 적금·정책 Repository, 실제 API 필드 매핑
+  repositories.py         공용 SQLite 적금·정책 Repository, 실제 API 필드 매핑
   policy_qualification.py 기준 중위소득 계산
   policy_rules.py         검증된 JSON 규칙 기반 자격판정 엔진(현재 프로덕션 미연결)
-  retrieval.py            로컬·pgvector RAG 검색
+  retrieval.py            FAISS·BM25 하이브리드 RAG와 로컬 폴백 검색
   rag_chunking.py         헤딩·법령 조항 경계 보존 청커
   conversation.py         Agentic 대화 의도 분류·도구 실행
   conversation_graph.py   LangGraph 대화 스레드 상태
@@ -57,11 +57,11 @@ PYTHONPATH=src ../.venv/bin/python -m roadmap_agent.cli \
   --monthly-budget 800000 --months 36 --goal 30000000 --risk balanced
 ```
 
-샘플 PostgreSQL에 적재한 실제 상품·정책 데이터를 사용하는 종단 실행은 다음과 같습니다.
+공용 SQLite에 적재한 실제 상품·정책 데이터를 사용하는 종단 실행은 다음과 같습니다.
 
 ```bash
 ../.venv/bin/python -m roadmap_agent.cli \
-  --postgres \
+  --sqlite \
   --monthly-budget 800000 \
   --months 36 \
   --goal 30000000 \
@@ -71,31 +71,31 @@ PYTHONPATH=src ../.venv/bin/python -m roadmap_agent.cli \
   --region-code 11:11110
 ```
 
-`--postgres`를 지정하면 `.env`의 PostgreSQL 접속정보를 실행 시점에 읽습니다. 출력에는
-비밀번호를 포함하지 않습니다. 적금은 실제 공시 금리·납입한도·기간으로 세후 만기액을
+`--sqlite`를 지정하면 `.env`의 `SHARED_DB_PATH`를 읽습니다. 적금은 실제 공시
+금리·납입한도·기간으로 세후 만기액을
 계산하고, 정책은 명시적으로 판정 가능한 자격과 지원액만 후보로 사용합니다.
 
 ## Gemini RAG 및 설명 생성
 
-공식 Markdown은 제목 경계를 우선해 최대 1,800자, 중첩 없이 나눕니다. 문서 내용의
-SHA-256 해시가 바뀐 청크만 다시 임베딩하므로 같은 명령을 반복해도 불필요한 API 호출을
-하지 않습니다.
+공식 Markdown은 제목 경계를 우선해 최대 1,800자, 중첩 없이 나눕니다. 기능 1과
+같이 Gemini dense 임베딩(FAISS)과 Kiwi-BM25 결과를 RRF로 결합하며, parent 문맥을
+최종 근거로 반환합니다.
 
 ```bash
 ../.venv/bin/python scripts/index_rag_documents.py
 ```
 
-`--force`를 붙인 경우에만 전체 청크를 다시 임베딩합니다. 평소에는 사용하지 않습니다.
-임베딩 적재 후 벡터 검색과 Gemini 설명을 함께 확인합니다.
+명령을 실행하면 `data/rag_index/`의 인덱스를 다시 생성합니다. 생성 후 하이브리드
+검색과 Gemini 설명을 함께 확인합니다.
 
 ```bash
 ../.venv/bin/python -m roadmap_agent.cli \
-  --postgres --vector-rag --gemini \
+  --sqlite --rag --gemini \
   --monthly-budget 800000 --months 36 --goal 30000000 --risk balanced \
   --age 28 --annual-income 40000000 --region-code 11:11110
 ```
 
-Gemini는 계산 결과를 수정하지 않고 `explanation`만 생성합니다. 임베딩 API 또는 pgvector
+Gemini는 계산 결과를 수정하지 않고 `explanation`만 생성합니다. 임베딩 API 또는 FAISS
 검색에 장애가 생기면 로컬 키워드 검색으로, 설명 생성에 실패하면 기존 JSON 결과로
 폴백합니다.
 
@@ -127,34 +127,21 @@ Gemini는 계산 결과를 수정하지 않고 `explanation`만 생성합니다.
 ../.venv/bin/python scripts/fetch_fss_finance_tips.py
 ```
 
-## 로컬 PostgreSQL
+## 공용 SQLite
 
-`.env`의 `POSTGRES_PASSWORD`를 입력한 뒤 PostgreSQL과 pgvector를 실행합니다.
-
-```bash
-docker compose up -d postgres
-docker compose ps
-```
-
-최초 실행 시 `db/init/001_schema.sql`이 적용되어 적금상품, 금리옵션, 정책상품, RAG 문서 테이블이 생성됩니다. 이 DB는 기능 2 로컬 통합 테스트용이며 성필님 서버의 실제 API 명세서가 확정되면 연결 어댑터를 맞춥니다.
-
-`db/init/002_source_contract.sql`은 `ROADMAP_AGENT_DATA.md`에서 확정한 원천 필드와 식별자를 보존하는 `raw` 스키마입니다. 이미 생성된 Docker 볼륨에는 자동 적용되지 않으므로 다음 명령으로 한 번 적용합니다.
+`.env`의 `SHARED_DB_PATH`에 기능 1·2가 함께 참조할 SQLite 파일 경로를 지정합니다.
+초기 스키마 계약은 `db/sqlite_schema.sql`입니다.
 
 ```bash
-docker compose exec -T postgres \
-  psql -U roadmap_agent -d roadmap_agent \
-  < db/init/002_source_contract.sql
+mkdir -p data/shared
+sqlite3 data/shared/seedup.sqlite < db/sqlite_schema.sql
 ```
 
-데이터 교체 원칙은 `docs/DATA_ADAPTER_CONTRACT.md`를 따릅니다.
-
-이미 `002_source_contract.sql`을 적용한 DB는 목록 테이블 의존성을 제거하는 다음 비파괴 마이그레이션을 적용합니다. 기존 목록 테이블과 데이터는 삭제하지 않습니다.
-
-```bash
-docker compose exec -T postgres \
-  psql -U roadmap_agent -d roadmap_agent \
-  < db/migrations/003_welfare_detail_only.sql
-```
+SQLite에는 PostgreSQL의 `raw` schema namespace가 없으므로 테이블은
+`finlife_saving_base`, `finlife_saving_option`, `youth_policy`,
+`welfare_service_detail`처럼 최상위에 둡니다. 성필님 제공 DB도 이 컬럼 계약을
+따르면 별도 코드 변경 없이 교체할 수 있습니다. 기능 2의 LangGraph 체크포인트와
+세션 테이블도 같은 파일에 생성되며 WAL과 30초 busy timeout을 사용합니다.
 
 수집한 세 fixture를 성필님 전달 명세와 같은 `raw` 컬럼에 UPSERT합니다.
 
@@ -179,7 +166,9 @@ uvicorn backend.app.main:app --reload --port 8001
 - 헬스체크: `http://localhost:8001/health`
 - API 문서: `http://localhost:8001/docs`
 - 시작 시 저장소 루트의 `.env`를 먼저 읽고 `backend/.env`로 보완합니다. 브라우저에는 이 값이 전달되지 않습니다.
-- `POSTGRES_*`를 설정해야 실제 적금·정책 Repository가 활성화되고, `ENABLE_GEMINI=true` + `GEMINI_API_KEY`가 있어야 최종 설명과 대화 계획기가 동작합니다. 두 플래그를 모두 비활성화하면 외부 API 비용 없이 결정론적 계산만 확인할 수 있습니다.
+- `SHARED_DB_PATH`를 설정해야 실제 적금·정책 Repository가 활성화되고,
+  `ENABLE_RAG=true`이면 FAISS+BM25 인덱스를 사용합니다. `ENABLE_GEMINI=true` +
+  `GEMINI_API_KEY`가 있어야 최종 설명과 대화 계획기가 동작합니다.
 
 **2. SeedUp 프론트엔드 (Next.js)** — 별도 터미널에서 `SeedUp/`:
 
@@ -197,6 +186,9 @@ NEXT_PUBLIC_ROADMAP_API_URL=http://localhost:8001 npm run dev
 ## 배포 (Docker)
 
 이 저장소 루트의 `Dockerfile`이 `roadmap_agent`와 `backend/`를 하나의 이미지로 빌드합니다.
+기능 2 전용 RAG 인덱스(`data/rag_index/index.faiss`, `documents.pkl`)도 이 이미지에
+포함됩니다. 공용 볼륨으로 분리하는 것은 기능 1·2가 함께 참조하는 `seedup.sqlite`뿐입니다.
+RAG 인덱스를 다시 생성한 경우 Docker 이미지를 다시 빌드해야 변경 내용이 반영됩니다.
 레지스트리는 쓰지 않고, 빌드는 로컬에서 끝낸 뒤 완성된 이미지 파일 하나만 서버로 전달합니다.
 
 ```bash
@@ -205,8 +197,14 @@ docker save -o seedup-roadmap-backend-v1.tar seedup-roadmap-backend:v1
 scp seedup-roadmap-backend-v1.tar <서버>:/path/to/
 # 서버에서:
 docker load -i /path/to/seedup-roadmap-backend-v1.tar
-docker run -d --env-file backend/.env -p 8001:8001 seedup-roadmap-backend:v1
+docker run -d --env-file backend/.env \
+  -v /path/to/shared-data:/app/data/shared \
+  -p 8001:8001 seedup-roadmap-backend:v1
 ```
+
+Compose 실행에서도 `data/rag_index`를 별도 마운트하지 않습니다. 이미지 내부의
+`/app/data/rag_index`를 사용하고, `${SHARED_DB_HOST_DIR:-./data/shared}`만
+`/app/data/shared`에 연결합니다.
 
 서버는 이 레포도 SeedUp 레포도 clone할 필요가 없습니다 (프론트엔드를 같은 서버에서 돌릴 경우 그쪽만 별도로 SeedUp을 clone). 자세한 배경과 현재 진행 상태는 Notion 「[기능 2] 서버 배포 준비」 페이지를 참고합니다.
 

@@ -31,25 +31,25 @@ The API always uses Roadmap-Agent's deterministic calculations. It uses local ev
 At startup, the backend loads server-only settings from the repo-root `.env` first, then
 `backend/.env` if one exists (values already set by the root `.env` win). For local
 development, the repo-root `.env` alone is enough — see `../.env.example` for the
-`CORS_ORIGINS`/`ENABLE_VECTOR_RAG` keys backend-specifically reads. A separate
+`CORS_ORIGINS`/`ENABLE_RAG` keys backend-specifically reads. A separate
 `backend/.env` only matters for deployment, where the server gets a minimal, scoped
 env file instead of the full repo-root one (see `.env.example` in this folder and the
 "배포 (Docker)" section in `../README.md`). Browser code never receives these values.
 
-- Set the `POSTGRES_*` variables to use structured savings and policy repositories.
-- Set `ENABLE_VECTOR_RAG=true` with PostgreSQL and `GEMINI_API_KEY` to use pgvector retrieval.
+- Set `SHARED_DB_PATH` to use the shared SQLite savings and policy repositories.
+- Set `ENABLE_RAG=true` with `GEMINI_API_KEY` to use the FAISS + BM25 hybrid index.
 - Set `ENABLE_GEMINI=true` with `GEMINI_API_KEY` to generate the final explanation.
 
 Keep both flags disabled during ordinary local UI development to avoid external API costs.
 
 ## Conversation session storage
 
-Conversation state (LangGraph checkpoints keyed by `threadId`) is stored in a local SQLite
+Conversation state (LangGraph checkpoints keyed by `threadId`) is stored in the shared SQLite
 file so a session survives backend restarts, including `uvicorn --reload` picking up a code
 change mid-test. Each thread is deleted automatically once it has been idle past its TTL — no
 chat content is kept permanently.
 
-- `CONVERSATION_STORE_PATH` (default: `backend/app/.data/conversations.sqlite`): file location.
+- `CONVERSATION_STORE_PATH` (default: `SHARED_DB_PATH`): file location.
 - `CONVERSATION_TTL_SECONDS` (default: `1800`, 30 minutes): idle time before a thread's state is deleted.
 
 The file (and its `-wal`/`-shm` companions) is git-ignored and safe to delete at any time —

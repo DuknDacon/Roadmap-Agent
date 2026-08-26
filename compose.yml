@@ -1,24 +1,3 @@
-services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: roadmap-agent-postgres
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-roadmap_agent}
-      POSTGRES_USER: ${POSTGRES_USER:-roadmap_agent}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - roadmap_agent_postgres:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-volumes:
-  roadmap_agent_postgres:
+# 호환용 진입점. 실제 서비스 정의는 docker-compose.roadmap.yml 한 곳에서 관리한다.
+include:
+  - docker-compose.roadmap.yml

@@ -15,12 +15,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Roadmap-Agent 라이브러리. 런타임에 필요한 것만 복사한다
-# (.venv/tests/scripts/data/raw 등은 제외). data/rag 는 로컬 RAG 검색
-# (LocalRagRetriever)이 참조하는 원문 폴더라 반드시 필요하다.
+# Roadmap-Agent 라이브러리. 런타임에 필요한 것만 복사한다.
+# 기능 2 전용 RAG 원문과 생성 인덱스도 같은 이미지에 포함한다.
+# 인덱스를 갱신했다면 이미지를 다시 빌드해야 한다.
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY data/rag ./data/rag
+COPY data/rag_index ./data/rag_index
 RUN pip install --no-cache-dir -e .
 
 # FastAPI 어댑터. .env 파일은 절대 복사하지 않는다 — 컨테이너 실행 시점에 주입한다.

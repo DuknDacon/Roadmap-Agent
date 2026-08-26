@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
-"""기능 2 fixture를 ROADMAP_AGENT_DATA.md 호환 raw 테이블에 UPSERT한다.
-
-PostgreSQL Python 드라이버 없이 Docker Compose의 psql을 사용한다. .env는
-Docker Compose만 처리하며 이 스크립트는 비밀정보를 읽거나 출력하지 않는다.
-"""
+"""기능 2 fixture를 공용 SQLite 계약 테이블에 UPSERT한다."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import subprocess
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -62,7 +58,7 @@ def _literal(value: Any, *, json_value: bool = False) -> str:
 
 
 def _json_literal(value: Any) -> str:
-    return _literal(json.dumps(value, ensure_ascii=False, separators=(",", ":"))) + "::jsonb"
+    return _literal(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
 
 
 def _upsert(table: str, columns: tuple[str, ...], values: list[str], conflict: str) -> str:
@@ -92,7 +88,7 @@ def build_finlife_sql(document: dict[str, Any]) -> list[str]:
         ]
         statements.append(
             _upsert(
-                "raw.finlife_saving_base", product_columns, values,
+                "finlife_saving_base", product_columns, values,
                 '"dcls_month", "fin_co_no", "fin_prdt_cd"',
             )
         )
@@ -108,7 +104,7 @@ def build_finlife_sql(document: dict[str, Any]) -> list[str]:
             ]
             statements.append(
                 _upsert(
-                    "raw.finlife_saving_option", option_columns, option_values,
+                    "finlife_saving_option", option_columns, option_values,
                     '"dcls_month", "fin_co_no", "fin_prdt_cd", "intr_rate_type", "rsrv_type", "save_trm"',
                 )
             )
@@ -124,7 +120,7 @@ def build_youth_sql(document: dict[str, Any]) -> list[str]:
         source_url = policy.get("aplyUrlAddr") or policy.get("refUrlAddr1") or policy.get("refUrlAddr2")
         values = [_literal(policy.get(field)) for field in YOUTH_FIELDS]
         values.extend((_literal(source_url), _json_literal(policy)))
-        statements.append(_upsert("raw.youth_policy", columns, values, '"plcyNo"'))
+        statements.append(_upsert("youth_policy", columns, values, '"plcyNo"'))
     return statements
 
 
@@ -144,20 +140,17 @@ def build_welfare_sql(document: dict[str, Any]) -> list[str]:
         source_url = merged.get("servDtlLink")
         values = [
             _literal(merged.get(field), json_value=field in JSON_FIELDS)
-            + ("::jsonb" if field in JSON_FIELDS and merged.get(field) not in (None, "") else "")
             for field in WELFARE_FIELDS
         ]
         values.extend((_literal(source_url), _json_literal(detail)))
-        statements.append(_upsert("raw.welfare_service_detail", columns, values, '"servId"'))
+        statements.append(_upsert("welfare_service_detail", columns, values, '"servId"'))
     return statements
 
 
 def build_sql(fixtures_dir: Path, project_root: Path) -> str:
     statements = [
-        "\\set ON_ERROR_STOP on",
+        (project_root / "db/sqlite_schema.sql").read_text(encoding="utf-8"),
         "BEGIN;",
-        (project_root / "db/init/002_source_contract.sql").read_text(encoding="utf-8"),
-        (project_root / "db/migrations/003_welfare_detail_only.sql").read_text(encoding="utf-8"),
     ]
     statements.extend(build_finlife_sql(_load(fixtures_dir / "finlife_savings_sample.json")))
     statements.extend(build_youth_sql(_load(fixtures_dir / "youth_policy_sample.json")))
@@ -165,21 +158,15 @@ def build_sql(fixtures_dir: Path, project_root: Path) -> str:
     statements.extend(
         (
             "COMMIT;",
-            "SELECT 'finlife_base' AS dataset, count(*) FROM raw.finlife_saving_base "
-            "UNION ALL SELECT 'finlife_option', count(*) FROM raw.finlife_saving_option "
-            "UNION ALL SELECT 'youth_policy', count(*) FROM raw.youth_policy "
-            "UNION ALL SELECT 'welfare_detail', count(*) FROM raw.welfare_service_detail "
-            "ORDER BY dataset;",
         )
     )
     return "\n".join(statements) + "\n"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="기능 2 fixture를 로컬 PostgreSQL에 적재합니다.")
+    parser = argparse.ArgumentParser(description="기능 2 fixture를 공용 SQLite에 적재합니다.")
     parser.add_argument("--fixtures-dir", type=Path, default=Path("data/fixtures"))
-    parser.add_argument("--database", default="roadmap_agent")
-    parser.add_argument("--user", default="roadmap_agent")
+    parser.add_argument("--database-path", type=Path, default=Path("data/shared/seedup.sqlite"))
     parser.add_argument("--print-sql", action="store_true", help="실행하지 않고 SQL을 stdout에 출력")
     return parser
 
@@ -195,12 +182,19 @@ def main() -> int:
     if args.print_sql:
         print(sql, end="")
         return 0
-    command = [
-        "docker", "compose", "exec", "-T", "postgres", "psql",
-        "-U", args.user, "-d", args.database,
-    ]
-    completed = subprocess.run(command, input=sql, text=True, cwd=root, check=False)
-    return completed.returncode
+    args.database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(args.database_path)
+    try:
+        connection.executescript(sql)
+        for table in (
+            "finlife_saving_base", "finlife_saving_option",
+            "youth_policy", "welfare_service_detail",
+        ):
+            count = connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            print(f"{table}: {count}")
+    finally:
+        connection.close()
+    return 0
 
 
 if __name__ == "__main__":

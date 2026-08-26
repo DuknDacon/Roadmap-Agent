@@ -2,11 +2,39 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from roadmap_agent.retrieval import LocalRagRetriever
+from roadmap_agent.retrieval import HybridRagRetriever, LocalRagRetriever
 from roadmap_agent.retrieval import FallbackRagRetriever
 
 
 class RetrievalTest(unittest.TestCase):
+    def test_hybrid_index_builds_and_searches_without_database(self):
+        class Embeddings:
+            @staticmethod
+            def embed_documents(texts):
+                return [[1.0, 0.0] if "ISA" in text else [0.0, 1.0] for text in texts]
+
+            @staticmethod
+            def embed_query(text):
+                return [1.0, 0.0] if "ISA" in text else [0.0, 1.0]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "rag"
+            index = Path(temp_dir) / "index"
+            root.mkdir()
+            (root / "isa.md").write_text(
+                "---\ntitle: ISA 공식 안내\nsource_url: https://example.test/isa\n---\n"
+                "# 가입\n\nISA 비과세 가입 안내",
+                encoding="utf-8",
+            )
+            (root / "loan.md").write_text(
+                "---\ntitle: 대출 안내\n---\n# 금리\n\n대출 금리 안내",
+                encoding="utf-8",
+            )
+            HybridRagRetriever.build(root, index, Embeddings())
+            result = HybridRagRetriever(index, Embeddings()).search("ISA 비과세", limit=1)
+            self.assertEqual(result[0].title, "ISA 공식 안내")
+            self.assertIn("ISA 비과세", result[0].content)
+
     def test_readme_is_not_loaded_as_rag_evidence(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
