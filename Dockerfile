@@ -5,12 +5,12 @@
 # 파일(tar)로 서버에 직접 전달한다. 서버는 이 레포를 clone할 필요가 없다.
 #
 # 빌드 (이 레포 루트에서):
-#   docker build -t seedup-roadmap-backend:<tag> .
+#   docker build -t roadmap-api:<tag> .
 #
 # 파일로 내보내 서버에 전달:
-#   docker save -o seedup-roadmap-backend-<tag>.tar seedup-roadmap-backend:<tag>
-#   scp seedup-roadmap-backend-<tag>.tar <서버>:/path/to/
-#   (서버에서) docker load -i seedup-roadmap-backend-<tag>.tar
+#   docker save -o roadmap-api-<tag>.tar roadmap-api:<tag>
+#   scp roadmap-api-<tag>.tar <서버>:/path/to/
+#   (서버에서) docker load -i roadmap-api-<tag>.tar
 FROM python:3.11-slim
 
 WORKDIR /app

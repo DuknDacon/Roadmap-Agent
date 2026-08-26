@@ -14,8 +14,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: seedup-roadmap-backend:v1
-    container_name: roadmap-agent-backend
+    image: roadmap-api:v1
+    container_name: roadmap-api
     restart: unless-stopped
     env_file:
       - .env

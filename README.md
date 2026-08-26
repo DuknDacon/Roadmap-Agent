@@ -14,32 +14,54 @@ SeedUp의 기능 2인 **AI 자산 관리 및 시드머니 로드맵** 전용 저
 
 각 에이전트 아래에 입력 데이터, 결정론적 계산 도구, RAG 근거, 경고문이 배치됩니다. ISA·연금 설명과 운영용 RAG 검색은 별도 사용자 기능이 아니라 투자 에이전트 내부 도구입니다.
 
-정책상품과 실제 적금상품은 성필님이 제공할 구조화 데이터 인터페이스를 연결하기 전까지 `data_status`에 미연결 상태를 명시합니다. 숫자를 LLM이 임의 생성하지 않습니다.
+정책상품과 실제 적금상품은 구조화 데이터(공용 SQLite, 아래 §공용 SQLite)가
+연결되면 `data_status`에 `structured_finlife_candidate` 등으로 표시되고,
+연결이 안 된 경우에만 `mock_rate_until_finlife_connected` 같은 폴백 상태로
+표시됩니다. 숫자를 LLM이 임의 생성하지 않습니다.
 
 ## 구조
 
 ```text
-src/roadmap_agent/
-  intake.py               단계형 입력 정규화
-  domain.py               요청·결과 모델
-  calculators.py          결정론적 계산 함수
-  agents.py               품목별 시나리오 노드
-  repositories.py         공용 SQLite 적금·정책 Repository, 실제 API 필드 매핑
-  policy_qualification.py 기준 중위소득 계산
-  policy_rules.py         검증된 JSON 규칙 기반 자격판정 엔진(현재 프로덕션 미연결)
-  retrieval.py            FAISS·BM25 하이브리드 RAG와 로컬 폴백 검색
-  rag_chunking.py         헤딩·법령 조항 경계 보존 청커
-  conversation.py         Agentic 대화 의도 분류·도구 실행
-  conversation_graph.py   LangGraph 대화 스레드 상태
-  gemini.py               Gemini 설명·대화 계획기·임베딩·웹 검색
-  orchestrator.py         전체 흐름 및 LangGraph 구성
-  cli.py                  로컬 실행 진입점
-data/rag/                 ISA·연금·정책 공식 RAG 원문
-data/source_docs/         수집 원문·API 가이드
-scripts/                  RAG 인덱싱, 복지서비스·금융꿀팁 수집기
-tests/                    단위 테스트
-backend/                  SeedUp 프론트엔드가 호출하는 FastAPI 어댑터 (별도 README 참고)
+Roadmap-Agent/
+├── src/roadmap_agent/   # 핵심 라이브러리 (아래 표)
+├── data/                # RAG 원문·인덱스, 공용 SQLite, 수집 원문
+├── scripts/             # RAG 인덱싱·fixture 적재·데이터 수집기
+├── tests/                # 단위 테스트
+└── backend/              # FastAPI 어댑터 (SeedUp 프론트가 호출) — 별도 README
 ```
+
+### `src/roadmap_agent/` 모듈
+
+| 파일 | 역할 |
+|---|---|
+| `intake.py` | 단계형 입력 정규화 |
+| `domain.py` | 요청·결과 모델 |
+| `calculators.py` | 결정론적 계산 함수 |
+| `agents.py` | 품목별 시나리오 노드 |
+| `repositories.py` | 공용 SQLite 적금·정책 Repository, 실제 API 필드 매핑 |
+| `policy_qualification.py` | 기준 중위소득 계산 |
+| `policy_rules.py` | 검증된 JSON 규칙 기반 자격판정 엔진 (현재 프로덕션 미연결) |
+| `retrieval.py` | FAISS·BM25 하이브리드 RAG와 로컬 폴백 검색 |
+| `rag_chunking.py` | 헤딩·법령 조항 경계 보존 청커 |
+| `conversation.py` | Agentic 대화 의도 분류·도구 실행 |
+| `conversation_graph.py` | LangGraph 대화 스레드 상태 |
+| `conversation_store.py` | 대화 세션 SQLite 저장소 (TTL 지나면 자동 삭제) |
+| `ui_state.py` | 대화 중 조건 변경을 요청 객체에 반영 (`conversation.py`가 사용) |
+| `ports.py` | Repository·Retriever·Explainer 인터페이스(Protocol) 정의 |
+| `region_codes.py` | 법정동 코드 옵션 로드·검색 |
+| `config.py` | `.env` 파일 로더 |
+| `gemini.py` | Gemini 설명·대화 계획기·임베딩·웹 검색 |
+| `orchestrator.py` | 전체 흐름 및 LangGraph 구성 |
+| `cli.py` | 로컬 실행 진입점 |
+
+### `data/` 하위
+
+| 경로 | 내용 |
+|---|---|
+| `rag/` | ISA·연금·정책 공식 RAG 원문 |
+| `rag_index/` | FAISS 인덱스 + 청크 (Docker 이미지에 포함) |
+| `shared/` | 공용 SQLite 파일(`seedup.sqlite`) — git-ignored, 로컬/서버마다 별도 |
+| `source_docs/` | 수집 원문·API 가이드 |
 
 ## 로컬 실행
 
@@ -137,13 +159,13 @@ mkdir -p data/shared
 sqlite3 data/shared/seedup.sqlite < db/sqlite_schema.sql
 ```
 
-SQLite에는 PostgreSQL의 `raw` schema namespace가 없으므로 테이블은
-`finlife_saving_base`, `finlife_saving_option`, `youth_policy`,
+테이블은 `finlife_saving_base`, `finlife_saving_option`, `youth_policy`,
 `welfare_service_detail`처럼 최상위에 둡니다. 성필님 제공 DB도 이 컬럼 계약을
-따르면 별도 코드 변경 없이 교체할 수 있습니다. 기능 2의 LangGraph 체크포인트와
-세션 테이블도 같은 파일에 생성되며 WAL과 30초 busy timeout을 사용합니다.
+따르는 SQLite 파일이면 별도 코드 변경 없이 교체할 수 있습니다. 기능 2의 LangGraph
+체크포인트와 세션 테이블도 같은 파일에 생성되며 WAL과 30초 busy timeout을 사용합니다.
 
-수집한 세 fixture를 성필님 전달 명세와 같은 `raw` 컬럼에 UPSERT합니다.
+수집한 세 fixture를 이 컬럼 계약에 맞춰 UPSERT합니다. (성필님 제공 DB도 같은
+계약을 따르는 SQLite 파일로 받습니다 — Postgres 등 별도 DB 서버는 쓰지 않습니다.)
 
 ```bash
 ../.venv/bin/python scripts/load_feature2_samples.py
@@ -192,14 +214,14 @@ RAG 인덱스를 다시 생성한 경우 Docker 이미지를 다시 빌드해야
 레지스트리는 쓰지 않고, 빌드는 로컬에서 끝낸 뒤 완성된 이미지 파일 하나만 서버로 전달합니다.
 
 ```bash
-docker build -t seedup-roadmap-backend:v1 .
-docker save -o seedup-roadmap-backend-v1.tar seedup-roadmap-backend:v1
-scp seedup-roadmap-backend-v1.tar <서버>:/path/to/
+docker build -t roadmap-api:v1 .
+docker save -o roadmap-api-v1.tar roadmap-api:v1
+scp roadmap-api-v1.tar <서버>:/path/to/
 # 서버에서:
-docker load -i /path/to/seedup-roadmap-backend-v1.tar
+docker load -i /path/to/roadmap-api-v1.tar
 docker run -d --env-file backend/.env \
   -v /path/to/shared-data:/app/data/shared \
-  -p 8001:8001 seedup-roadmap-backend:v1
+  -p 8001:8001 --name roadmap-api roadmap-api:v1
 ```
 
 Compose 실행에서도 `data/rag_index`를 별도 마운트하지 않습니다. 이미지 내부의
@@ -215,9 +237,3 @@ Compose 실행에서도 `data/rag_index`를 별도 마운트하지 않습니다.
 3. LLM은 계산값을 변경하지 않고 설명·질문 분류·문장 생성을 담당합니다.
 4. 특정 종목이나 펀드의 매수를 추천하지 않고 자산군 수준의 범위만 제시합니다.
 5. 모든 결과는 참고용이며 실제 가입 전 최신 약관과 공식 원문을 확인합니다.
-
-## 기능 검증용 UI 초안
-
-최종 UI와 분리된 Streamlit 초안은 `prototype_ui/`에 있습니다. 기능형 필수 입력으로 최초
-로드맵을 만든 뒤 대화로 월 투입액·목표금액·투자비중 등을 변경해 재계산하는 흐름을
-검증합니다. 설치·실행 방법은 `prototype_ui/README.md`를 따릅니다.
