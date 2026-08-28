@@ -122,7 +122,7 @@ class OrchestratorTest(unittest.TestCase):
         self.assertEqual(response.result.recommended, result.recommended)
         self.assertEqual(response.executed_tools, ("result_explainer",))
 
-    def test_returns_recommendation_and_one_alternative_without_llm(self):
+    def test_returns_recommendation_and_alternatives_without_llm(self):
         request = RoadmapRequest(
             monthly_budget=800_000,
             horizon_months=36,
@@ -131,7 +131,8 @@ class OrchestratorTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             result = run_roadmap(request, Path(temp_dir))
-        self.assertEqual(1 + len(result.alternatives), 2)
+        # alternatives는 이제 "낙점된 1개"가 아니라 나머지 후보 전체를 담는다.
+        self.assertGreaterEqual(len(result.alternatives), 1)
         self.assertNotEqual(result.recommended.kind, "policy")
         self.assertEqual(sum(result.recommended.monthly_allocation.values()), 800_000)
         self.assertTrue(result.assumptions["investment_values_are_scenarios_not_forecasts"])
@@ -235,9 +236,12 @@ class OrchestratorTest(unittest.TestCase):
                 savings_repository=MultipleSavingsRepositoryStub(),
             )
         scenarios = [result.recommended, *result.alternatives]
-        self.assertEqual(len(scenarios), 2)
+        # alternatives가 이제 나머지 후보 전체를 담으므로, 스텁이 제공한
+        # 적금 후보 3개(추천 1 + 대안 2) 전부가 서로 다르게 랭킹돼야 한다.
+        self.assertEqual(len(scenarios), 3)
         self.assertTrue(all(item.kind == "savings" for item in scenarios))
-        self.assertNotEqual(scenarios[0].title, scenarios[1].title)
+        titles = [item.title for item in scenarios]
+        self.assertEqual(len(titles), len(set(titles)))
 
     def test_duplicate_options_of_same_product_are_not_two_recommendations(self):
         request = RoadmapRequest(

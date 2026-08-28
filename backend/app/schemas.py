@@ -77,6 +77,7 @@ class ScenarioResponse(ApiModel):
 class RoadmapResponse(ApiModel):
     recommended: ScenarioResponse
     alternative: ScenarioResponse
+    alternatives: list[ScenarioResponse] = Field(default_factory=list)
     summary: str
     explanation: str | None = None
     recommended_reason: str | None = Field(default=None, alias="recommendedReason")

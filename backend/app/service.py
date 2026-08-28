@@ -187,9 +187,15 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         else "직전년도 과세소득과 현재 예상소득을 각각 자격과 납입여력에 반영했습니다."
     )
     alternative = result.alternatives[0] if result.alternatives else result.recommended
+    alternatives_list = (
+        [_scenario(item, "대안") for item in result.alternatives]
+        if result.alternatives
+        else [_scenario(result.recommended, "대안")]
+    )
     return RoadmapResponse(
         recommended=_scenario(result.recommended, "최우선 추천"),
         alternative=_scenario(alternative, "대안"),
+        alternatives=alternatives_list,
         summary=result.chat_reply or result.recommended_reason or income_note,
         explanation=result.chat_reply,
         recommendedReason=result.recommended_reason,

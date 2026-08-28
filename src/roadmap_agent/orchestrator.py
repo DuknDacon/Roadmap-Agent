@@ -129,7 +129,7 @@ def finalize(request: RoadmapRequest, scenarios: list[Scenario]) -> RoadmapResul
     structured = any(item.data_status.startswith("structured_") for item in scenarios)
     return RoadmapResult(
         recommended=ordered[0],
-        alternatives=remaining[:1],
+        alternatives=remaining,
         assumptions={
             "savings_calculation": (
                 "structured_product_rate_and_tax"
