@@ -143,7 +143,7 @@ def build_welfare_sql(document: dict[str, Any]) -> list[str]:
             for field in WELFARE_FIELDS
         ]
         values.extend((_literal(source_url), _json_literal(detail)))
-        statements.append(_upsert("welfare_service_detail", columns, values, '"servId"'))
+        statements.append(_upsert("welfare_service", columns, values, '"servId"'))
     return statements
 
 
@@ -188,7 +188,7 @@ def main() -> int:
         connection.executescript(sql)
         for table in (
             "finlife_saving_base", "finlife_saving_option",
-            "youth_policy", "welfare_service_detail",
+            "youth_policy", "welfare_service",
         ):
             count = connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             print(f"{table}: {count}")

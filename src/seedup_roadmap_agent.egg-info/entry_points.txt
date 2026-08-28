@@ -1,2 +1,0 @@
-[console_scripts]
-roadmap-agent = roadmap_agent.cli:main

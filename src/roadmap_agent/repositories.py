@@ -386,7 +386,7 @@ class SqlitePolicyRepository:
                 map_youth_policy_row(dict(row), request, as_of=self.as_of)
                 for row in youth_rows
             ]
-            welfare_rows = connection.execute("SELECT * FROM welfare_service_detail").fetchall()
+            welfare_rows = connection.execute("SELECT * FROM welfare_service").fetchall()
             welfare = [
                 map_welfare_policy_row(dict(row), request, as_of=self.as_of)
                 for row in welfare_rows
