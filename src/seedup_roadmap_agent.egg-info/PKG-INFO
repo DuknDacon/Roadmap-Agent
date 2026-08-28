@@ -159,7 +159,7 @@ sqlite3 data/shared/seedup.sqlite < db/sqlite_schema.sql
 
 SQLite에는 PostgreSQL의 `raw` schema namespace가 없으므로 테이블은
 `finlife_saving_base`, `finlife_saving_option`, `youth_policy`,
-`welfare_service_detail`처럼 최상위에 둡니다. 성필님 제공 DB도 이 컬럼 계약을
+`welfare_service`처럼 최상위에 둡니다. 성필님 제공 DB도 이 컬럼 계약을
 따르면 별도 코드 변경 없이 교체할 수 있습니다. 기능 2의 LangGraph 체크포인트와
 세션 테이블도 같은 파일에 생성되며 WAL과 30초 busy timeout을 사용합니다.
 

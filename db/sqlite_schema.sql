@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS youth_policy (
 CREATE INDEX IF NOT EXISTS youth_policy_codes_idx
 ON youth_policy (plcyAprvSttsCd, jobCd, earnCndSeCd);
 
-CREATE TABLE IF NOT EXISTS welfare_service_detail (
+CREATE TABLE IF NOT EXISTS welfare_service (
     servId TEXT PRIMARY KEY, servNm TEXT NOT NULL, servDtlLink TEXT,
     jurMnofNm TEXT, tgtrDtlCn TEXT, slctCritCn TEXT, alwServCn TEXT,
     wlfareInfoOutlCn TEXT, crtrYr TEXT, rprsCtadr TEXT, sprtCycNm TEXT,
