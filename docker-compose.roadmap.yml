@@ -24,6 +24,6 @@ services:
       CONVERSATION_STORE_PATH: /app/data/shared/seedup.sqlite
       RAG_INDEX_DIR: /app/data/rag_index
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     volumes:
       - ${SHARED_DB_HOST_DIR:-./data/shared}:/app/data/shared

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import re
+import time
 from typing import Any, TypedDict
 
 from .agents import (
@@ -118,6 +119,13 @@ def finalize(request: RoadmapRequest, scenarios: list[Scenario]) -> RoadmapResul
         candidates = scored
     ordered = sorted(candidates, key=lambda scenario: (-(scenario.score or 0), scenario.kind))
     remaining = [item for item in sorted(scored, key=lambda x: -(x.score or 0)) if item != ordered[0]]
+    print(f"[RM-04a] 후보 {len(scored)}개 점수 비교 (target_amount 필터 후 {len(candidates)}개 대상):")
+    for item in sorted(scored, key=lambda x: -(x.score or 0)):
+        picked = "★선정" if item is ordered[0] else ("○필터제외" if item not in candidates else "")
+        print(
+            f"[RM-04a]   {item.kind:9s} score={item.score!s:>6} "
+            f"expected_max={item.expected_max:>10,} | {item.title} {picked}"
+        )
     structured = any(item.data_status.startswith("structured_") for item in scenarios)
     return RoadmapResult(
         recommended=ordered[0],
@@ -149,6 +157,11 @@ def run_roadmap(
     explainer: RoadmapExplainer | None = None,
 ) -> RoadmapResult:
     request.validate()
+    t0 = time.monotonic()
+    print(
+        f"[RM-01] run_roadmap 진입 | risk={request.risk_profile.value} "
+        f"horizon={request.horizon_months}m budget={request.monthly_budget:,}원"
+    )
     active_retriever = retriever or LocalRagRetriever(rag_root or _default_rag_root())
     policies = policy_repository or EmptyPolicyRepository()
     savings_products = savings_repository or EmptySavingsProductRepository()
@@ -160,6 +173,7 @@ def run_roadmap(
             request, active_retriever, policies, limit=3
         )
     )
+    print(f"[RM-02] savings+policy 후보 {len(scenarios)}개 생성")
     effective_investment_ratio = investment_cap(
         request.risk_profile,
         request.horizon_months,
@@ -172,8 +186,19 @@ def run_roadmap(
                 balanced_agent(request, active_retriever, savings_products),
             ]
         )
+        print(
+            f"[RM-03] investment+balanced 추가 | ratio={effective_investment_ratio:.2f} "
+            f"총 후보 {len(scenarios)}개"
+        )
+    else:
+        print("[RM-03] investment_cap=0 → investment/balanced 스킵")
     result = finalize(request, scenarios)
+    print(
+        f"[RM-04] 최종 추천={result.recommended.kind}"
+        f"({result.recommended.title}) score={result.recommended.score}"
+    )
     if explainer is not None:
+        t1 = time.monotonic()
         try:
             explanation = explainer.explain(request, result)
             result = replace(
@@ -182,6 +207,8 @@ def run_roadmap(
                 alternative_reason=explanation.alternative_reason,
                 chat_reply=explanation.chat_reply,
             )
+            print(f"[RM-05] explainer 성공 | {time.monotonic()-t1:.2f}s")
+            print(f"[RM-05a] recommended_reason={explanation.recommended_reason[:150]!r}")
         except Exception as exc:
             result = replace(
                 result,
@@ -190,6 +217,11 @@ def run_roadmap(
                     "llm_status": _safe_external_error(exc),
                 },
             )
+            print(
+                f"[RM-05] ⚠︎ explainer 실패 | {type(exc).__name__} | "
+                f"{time.monotonic()-t1:.2f}s"
+            )
+    print(f"[RM-06] run_roadmap 종료 | 총 {time.monotonic()-t0:.2f}s")
     return result
 
 

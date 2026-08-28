@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import pickle
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -267,6 +268,8 @@ class FallbackRagRetriever:
         self.fallback_reason: str | None = None
 
     def search(self, query: str, limit: int = 3) -> list[Evidence]:
+        t0 = time.monotonic()
+        print(f"[RAG-01] search 진입 | query={query[:60]!r} limit={limit}")
         try:
             primary_results = self.primary.search(query, limit)
             local_results = self.fallback.search(query, limit)
@@ -276,6 +279,10 @@ class FallbackRagRetriever:
                 self.fallback_used = True
             if not primary_results:
                 self.fallback_reason = "벡터 검색 결과 없음"
+                print(
+                    f"[RAG-02] ⚠︎ primary 결과 없음 → local fallback만 사용 | "
+                    f"fallback={len(local_results)}건 | {time.monotonic()-t0:.2f}s"
+                )
                 return local_results
 
             # 벡터 검색은 항상 결과를 반환할 수 있으므로, 구체적인 상품명이 일치하는
@@ -289,8 +296,24 @@ class FallbackRagRetriever:
                     continue
                 seen.add(key)
                 unique.append(item)
-            return unique[:limit]
+            result = unique[:limit]
+            top_score = result[0].score if result else None
+            print(
+                f"[RAG-02] primary={len(primary_results)}건 local={len(local_results)}건 "
+                f"→ 병합 {len(result)}건 top_score={top_score} | {time.monotonic()-t0:.2f}s"
+            )
+            for i, item in enumerate(result, 1):
+                print(
+                    f"[RAG-03]   {i}. {item.title!r} (score={item.score}) "
+                    f"| {item.source_url or '출처 없음'}"
+                )
+            return result
         except Exception as exc:
             self.fallback_used = True
             self.fallback_reason = type(exc).__name__
-            return self.fallback.search(query, limit)
+            results = self.fallback.search(query, limit)
+            print(
+                f"[RAG-02] ⚠︎ primary 예외 → local fallback 전환 | {type(exc).__name__} | "
+                f"fallback={len(results)}건 | {time.monotonic()-t0:.2f}s"
+            )
+            return results

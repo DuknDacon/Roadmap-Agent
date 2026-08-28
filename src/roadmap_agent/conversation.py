@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import StrEnum
 import re
+import time
 from typing import Protocol
 
 from .domain import Evidence, RoadmapRequest, RoadmapResult
@@ -607,17 +608,36 @@ def execute_conversation(
     planner: ConversationPlanner | None = None,
     context: str = "",
 ) -> ConversationResponse:
+    t0 = time.monotonic()
+    print(f"[CV-01] execute_conversation 진입 | message={message[:80]!r}")
     updated_policy_request, policy_changes = apply_policy_answers(request, message, context)
     plan = plan_conversation(updated_policy_request, message, planner, result, context)
+    print(
+        f"[CV-02] intent={plan.intent.value} planned_by={plan.planned_by} "
+        f"tools={list(plan.tools)}"
+        + (
+            f" clarification={plan.clarification_question!r}"
+            if plan.clarification_question
+            else ""
+        )
+    )
+
+    def _finish(response: ConversationResponse) -> ConversationResponse:
+        print(
+            f"[CV-09] 응답 완료 | status={response.status.value} "
+            f"tools={list(response.executed_tools)} | {time.monotonic()-t0:.2f}s"
+        )
+        return response
+
     if plan.clarification_question:
-        return ConversationResponse(
+        return _finish(ConversationResponse(
             ConversationStatus.NEEDS_INPUT,
             plan.intent,
             updated_policy_request,
             result,
             plan.clarification_question,
             state_history=("draft", "needs_input"),
-        )
+        ))
     if plan.intent == ConversationIntent.CONDITION_CHANGE:
         if plan.structured_changes:
             updated, changes = apply_structured_changes(request, plan.structured_changes)
@@ -638,7 +658,7 @@ def execute_conversation(
             explainer=explainer,
         )
         reply = " · ".join(changes) + " 조건을 반영해 전체 로드맵을 다시 계산했습니다."
-        return ConversationResponse(
+        return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
             updated,
@@ -646,7 +666,7 @@ def execute_conversation(
             reply,
             plan.tools,
             tuple(changes),
-        )
+        ))
     if plan.intent == ConversationIntent.RESULT_EXPLANATION:
         try:
             explained, reply = explain_existing_result(
@@ -655,21 +675,21 @@ def execute_conversation(
         except Exception:
             reply = result_reply(result, message, context)
             explained = replace(result, chat_reply=reply)
-        return ConversationResponse(
+        return _finish(ConversationResponse(
             ConversationStatus.COMPLETED, plan.intent, request, explained, reply, plan.tools
-        )
+        ))
     if plan.intent == ConversationIntent.PRODUCT_ALTERNATIVES:
         reply = alternative_products_reply(
             request, result, message, policy_repository, savings_repository
         )
-        return ConversationResponse(
+        return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
             request,
             replace(result, chat_reply=reply),
             reply,
             plan.tools,
-        )
+        ))
     if plan.intent == ConversationIntent.PRODUCT_RANKING:
         reply = ranked_products_reply(
             request,
@@ -679,20 +699,20 @@ def execute_conversation(
             policy_repository,
             savings_repository,
         )
-        return ConversationResponse(
+        return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
             request,
             replace(result, chat_reply=reply),
             reply,
             plan.tools,
-        )
+        ))
     if plan.intent == ConversationIntent.FINANCIAL_QA:
         try:
             evidence = retriever.search(message, limit=3)
         except Exception:
             evidence = []
-        return ConversationResponse(
+        return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
             request,
@@ -700,16 +720,16 @@ def execute_conversation(
             evidence_reply(message, evidence, explainer),
             plan.tools,
             evidence=tuple(evidence),
-        )
+        ))
     if plan.intent == ConversationIntent.INPUT_COMPLETION:
-        return ConversationResponse(
+        return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
             request,
             result,
             input_gap_reply(request),
             plan.tools,
-        )
+        ))
 
     policies = policy_repository.find_candidates(replace(updated_policy_request, question=message))
     eligible = [item for item in policies if item.eligible]
@@ -742,7 +762,7 @@ def execute_conversation(
         reply = "현재 입력으로 자격 가능성이 확인된 정책상품은 " + ", ".join(details) + "입니다."
     else:
         reply = "현재 입력과 조회 결과로 자격이 확인된 정책상품이 없습니다. 탈락 사유와 모집상태를 공식 공고에서 다시 확인해 주세요."
-    return ConversationResponse(
+    return _finish(ConversationResponse(
         ConversationStatus.COMPLETED,
         plan.intent,
         updated_policy_request,
@@ -750,4 +770,4 @@ def execute_conversation(
         reply,
         plan.tools,
         tuple(policy_changes),
-    )
+    ))
