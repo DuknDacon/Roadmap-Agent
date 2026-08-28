@@ -364,8 +364,11 @@ class GeminiConversationPlanner:
                     "선택한다. structured_changes에는 monthly_budget, horizon_months, target_amount, "
                     "max_investment_ratio, has_emergency_fund, max_investment_ratio_delta만 사용할 수 "
                     "있다. '더 안전하게'는 max_investment_ratio_delta=-0.1, '위험을 늘려도 된다'는 "
-                    "max_investment_ratio_delta=0.1로 표현한다. 가려진 숫자를 추측하지 말고 "
-                    "값이 불명확하면 intent를 unclear로 하고 "
+                    "max_investment_ratio_delta=0.1로 표현한다 — 이건 위험도(risk)라는 변경 대상이 "
+                    "명확한 경우에만 해당한다. '더 좋은 걸로', '더 나은 걸로', '알아서 해줘'처럼 "
+                    "위험도·금액·기간 중 **무엇을** 바꿀지 특정할 수 없는 표현은 intent를 반드시 "
+                    "unclear로 하고 structured_changes를 임의로 채우지 않는다. 가려진 숫자를 "
+                    "추측하지 말고 값이 불명확하면 intent를 unclear로 하고 "
                     "clarification_question에 한국어 질문 하나를 넣는다."
                 ),
                 response_mime_type="application/json",
