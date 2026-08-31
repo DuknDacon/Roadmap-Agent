@@ -14,7 +14,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: roadmap-api:v5
+    image: roadmap-api:v6
     container_name: roadmap-api
     restart: unless-stopped
     env_file:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 from datetime import date
 from dataclasses import asdict
 from typing import Any
@@ -137,6 +138,7 @@ class GeminiRoadmapExplainer:
         client: Any | None = None,
         web_search_enabled: bool = False,
         web_search_monthly_limit: int = 1000,
+        usage_db_path: str | None = None,
     ):
         self.model = model or os.environ.get("GEMINI_LLM_MODEL", "gemini-3.5-flash-lite")
         if client is None:
@@ -149,9 +151,49 @@ class GeminiRoadmapExplainer:
         self.client = client
         self.web_search_enabled = web_search_enabled
         self.web_search_monthly_limit = web_search_monthly_limit
+        # 다중 워커·인스턴스에서도 한도를 공유하기 위해 공용 DB에 월별 카운터를 둔다.
+        # SHARED_DB_PATH가 없으면(로컬 테스트 등) 프로세스 메모리로 폴백한다 — 이
+        # 경우에는 프로세스별로 한도가 따로 카운트된다.
+        self._usage_db_path = usage_db_path or os.getenv("SHARED_DB_PATH")
         self._web_search_month = date.today().strftime("%Y-%m")
         self._web_search_count = 0
         self._web_search_cache: dict[str, str] = {}
+
+    def _try_consume_web_search_quota(self) -> bool:
+        """이번 달 웹 검색 한도가 남아 있으면 원자적으로 1회 소비하고 True를 반환한다."""
+        month = date.today().strftime("%Y-%m")
+        path = self._usage_db_path
+        if not path:
+            if month != self._web_search_month:
+                self._web_search_month = month
+                self._web_search_count = 0
+            if self._web_search_count >= self.web_search_monthly_limit:
+                return False
+            self._web_search_count += 1
+            return True
+        connection = sqlite3.connect(path, timeout=5)
+        try:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS web_search_usage "
+                "(year_month TEXT PRIMARY KEY, search_count INTEGER NOT NULL DEFAULT 0)"
+            )
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT search_count FROM web_search_usage WHERE year_month = ?", (month,)
+            ).fetchone()
+            current = row[0] if row else 0
+            if current >= self.web_search_monthly_limit:
+                connection.rollback()
+                return False
+            connection.execute(
+                "INSERT INTO web_search_usage (year_month, search_count) VALUES (?, 1) "
+                "ON CONFLICT(year_month) DO UPDATE SET search_count = search_count + 1",
+                (month,),
+            )
+            connection.commit()
+            return True
+        finally:
+            connection.close()
 
     def explain(self, request: RoadmapRequest, result: RoadmapResult) -> RoadmapExplanation:
         from google.genai import types
@@ -268,12 +310,7 @@ class GeminiRoadmapExplainer:
         cached = self._web_search_cache.get(question)
         if cached:
             return cached
-        month = date.today().strftime("%Y-%m")
-        if month != self._web_search_month:
-            self._web_search_month = month
-            self._web_search_count = 0
-            self._web_search_cache.clear()
-        if self._web_search_count >= self.web_search_monthly_limit:
+        if not self._try_consume_web_search_quota():
             return fallback_answer or "공식 웹 검색 월 한도에 도달했습니다. 내부 근거만으로는 답을 확정할 수 없습니다."
 
         allowed_domains = (
@@ -294,7 +331,6 @@ class GeminiRoadmapExplainer:
                 max_output_tokens=700,
             ),
         )
-        self._web_search_count += 1
         answer = (response.text or "").strip()
         sources: list[str] = []
         candidates = getattr(response, "candidates", None) or []

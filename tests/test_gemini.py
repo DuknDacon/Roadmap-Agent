@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from roadmap_agent.domain import Evidence, RiskProfile, RoadmapRequest, RoadmapResult, Scenario
@@ -176,6 +178,39 @@ class GeminiTest(unittest.TestCase):
 
         self.assertIn("가입일 직전 과세기간", answer)
         self.assertIn("정부기여금 변경 여부는 확정할 수 없습니다", answer)
+
+    def test_web_search_quota_is_shared_across_instances_via_db(self):
+        """다중 워커·인스턴스 시나리오: 같은 DB를 보는 서로 다른 explainer도 월 한도를 공유해야 한다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "shared.sqlite")
+            explainer_a = GeminiRoadmapExplainer(
+                client=SimpleNamespace(models=FakeModels()),
+                web_search_enabled=True,
+                web_search_monthly_limit=2,
+                usage_db_path=db_path,
+            )
+            explainer_b = GeminiRoadmapExplainer(
+                client=SimpleNamespace(models=FakeModels()),
+                web_search_enabled=True,
+                web_search_monthly_limit=2,
+                usage_db_path=db_path,
+            )
+
+            self.assertTrue(explainer_a._try_consume_web_search_quota())
+            self.assertTrue(explainer_b._try_consume_web_search_quota())
+            # 두 인스턴스가 합쳐서 한도(2)에 도달했으므로 어느 쪽이 다시 시도해도 실패해야 한다.
+            self.assertFalse(explainer_a._try_consume_web_search_quota())
+            self.assertFalse(explainer_b._try_consume_web_search_quota())
+
+    def test_web_search_quota_falls_back_to_process_memory_without_db(self):
+        explainer = GeminiRoadmapExplainer(
+            client=SimpleNamespace(models=FakeModels()),
+            web_search_enabled=True,
+            web_search_monthly_limit=1,
+            usage_db_path=None,
+        )
+        self.assertTrue(explainer._try_consume_web_search_quota())
+        self.assertFalse(explainer._try_consume_web_search_quota())
 
 
 if __name__ == "__main__":
