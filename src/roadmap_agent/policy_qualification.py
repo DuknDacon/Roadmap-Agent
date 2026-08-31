@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import functools
+import os
 import re
+import sqlite3
 from typing import TYPE_CHECKING
 
 
@@ -8,6 +11,9 @@ if TYPE_CHECKING:
     from .domain import RoadmapRequest
 
 
+# `median_income` 테이블(SHARED_DB_PATH) 조회가 안 될 때만 쓰는 최후 폴백값.
+# 매년 갱신은 여기가 아니라 DB 행 추가로 한다 — 이 dict는 DB가 없는 로컬
+# 개발/테스트 환경에서도 함수가 동작하게 하려는 용도일 뿐이다.
 MEDIAN_INCOME_BY_YEAR: dict[int, tuple[int, ...]] = {
     # 보건복지부 연도별 기준 중위소득, 월 기준 1~7인 가구.
     2025: (
@@ -33,8 +39,35 @@ MEDIAN_INCOME_SOURCE_URL = "https://www.mohw.go.kr/menu.es?mid=a10708010900"
 MEDIAN_INCOME_PERCENT_RE = re.compile(r"중위소득\s*([\d.]+)\s*%")
 
 
+@functools.lru_cache(maxsize=1)
+def _median_income_table_from_db() -> dict[int, tuple[int, ...]]:
+    """`median_income` 테이블에서 연도별 1~7인 가구 기준 중위소득을 읽는다.
+
+    SHARED_DB_PATH가 없거나 테이블이 비어 있으면(로컬 테스트 등) 빈 dict를
+    반환해 호출부가 `MEDIAN_INCOME_BY_YEAR` 폴백으로 넘어가게 한다.
+    """
+    path = os.getenv("SHARED_DB_PATH")
+    if not path:
+        return {}
+    try:
+        connection = sqlite3.connect(path, timeout=5)
+        try:
+            rows = connection.execute(
+                "SELECT effective_year, household_size, median_monthly_income "
+                "FROM median_income ORDER BY effective_year, household_size"
+            ).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return {}
+    table: dict[int, list[int]] = {}
+    for year, _household_size, amount in rows:
+        table.setdefault(year, []).append(amount)
+    return {year: tuple(values) for year, values in table.items()}
+
+
 def median_income_monthly(year: int, household_size: int) -> int | None:
-    values = MEDIAN_INCOME_BY_YEAR.get(year)
+    values = _median_income_table_from_db().get(year) or MEDIAN_INCOME_BY_YEAR.get(year)
     if values is None or household_size < 1:
         return None
     if household_size <= len(values):
