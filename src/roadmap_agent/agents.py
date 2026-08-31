@@ -247,7 +247,6 @@ def policy_candidate_scenarios(
         if (
             policy.preferential_support_rate is not None
             and policy.benefit_tier == "preferential"
-            and policy.qualification_status == "confirmed"
         ):
             best_rate = policy.preferential_support_rate
         best_support = (

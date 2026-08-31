@@ -260,7 +260,12 @@ def map_youth_policy_row(
         if needs_verification
         else "confirmed"
     )
-    if benefit_tier == "preferential_possible" and qualification_status == "confirmed":
+    # qualification_status는 "확인 필요" 계열 문구(운영기관 재확인, 우대형 세부
+    # 자격 확인 등)가 하나라도 있으면 needs_verification으로 굳어지는데, 중위소득
+    # 조건이 있는 정책은 그 문구가 항상 붙어 confirmed에 절대 도달하지 못한다.
+    # 그래서 우대형 승격은 사용자가 입력한 is_sme_employee=True만으로 판단하고,
+    # 운영기관 최종 확인 필요 여부는 qualification_status/reason에서 계속 안내한다.
+    if benefit_tier == "preferential_possible" and eligible:
         benefit_tier = "preferential"
 
     return PolicyBenefit(

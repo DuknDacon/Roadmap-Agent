@@ -4,6 +4,7 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
+from roadmap_agent.agents import policy_candidate_scenarios
 from roadmap_agent.domain import RiskProfile, RoadmapRequest
 from roadmap_agent.repositories import (
     SqliteSavingsProductRepository,
@@ -12,6 +13,19 @@ from roadmap_agent.repositories import (
     map_youth_policy_row,
     sqlite_connection_factory,
 )
+
+
+class _FakeRetriever:
+    def search(self, query, limit=3):
+        return []
+
+
+class _FakePolicyRepository:
+    def __init__(self, policies):
+        self._policies = policies
+
+    def find_candidates(self, request):
+        return self._policies
 
 
 class RepositoriesTest(unittest.TestCase):
@@ -137,7 +151,11 @@ class RepositoriesTest(unittest.TestCase):
             ("household_monthly_income", "financial_income_taxed", "is_sme_employee"),
         )
 
-    def test_preferential_rate_is_not_confirmed_from_sme_flag_alone(self):
+    def test_preferential_rate_applies_once_sme_flag_confirmed(self):
+        """운영기관의 최종 확인이 남아있다는 안내(qualification_status)는 계속 뜨지만,
+        사용자가 중소기업 재직 여부를 답한 이상 실제 점수 계산에는 우대형 요율을
+        반영해야 한다 — 그래야 우대형 적용 시 목표를 달성할 수 있는 상품이 순위·
+        후보 필터에서 부당하게 밀려나지 않는다."""
         request = RoadmapRequest(
             **{
                 **self.request.__dict__,
@@ -159,10 +177,78 @@ class RepositoriesTest(unittest.TestCase):
         )
 
         assert policy is not None
+        # 라벨은 여전히 "확인 필요"로 정직하게 유지된다 — 바뀐 건 benefit_tier뿐.
         self.assertEqual(policy.qualification_status, "needs_verification")
-        self.assertEqual(policy.benefit_tier, "preferential_possible")
+        self.assertEqual(policy.benefit_tier, "preferential")
         self.assertEqual(policy.missing_qualification_fields, ())
         self.assertIn("5,128,476원 이하", policy.reason)
+
+    def test_preferential_rate_not_applied_when_ineligible(self):
+        """is_sme_employee=True여도 다른 사유로 이미 자격이 없는 상품에까지
+        우대형 요율을 적용해서는 안 된다."""
+        request = RoadmapRequest(
+            **{
+                **self.request.__dict__,
+                "household_size": 1,
+                "household_monthly_income": 3_000_000,
+                "financial_income_taxed": True,
+                "is_sme_employee": True,
+            }
+        )
+        policy = map_youth_policy_row(
+            {
+                "plcyNo": "P3", "plcyNm": "청년미래적금",
+                "plcyExplnCn": "3년 만기, 월 50만원 한도",
+                "plcySprtCn": "일반형 6%, 우대형 12% 정부기여금 지원",
+                "earnEtcCn": "가구 중위소득 200% 이하",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+
+        assert policy is not None
+        self.assertFalse(policy.eligible)
+        self.assertEqual(policy.benefit_tier, "preferential_possible")
+
+    def test_preferential_rate_changes_scenario_scoring_not_just_the_flag(self):
+        """benefit_tier만 바뀌고 실제 점수 계산에는 반영되지 않으면 의미가 없다 —
+        policy_candidate_scenarios가 만드는 시나리오의 예상액이 실제로 우대형
+        12% 요율을 쓰는지까지 끝까지 확인한다."""
+        request = RoadmapRequest(
+            **{
+                **self.request.__dict__,
+                "monthly_budget": 500_000,
+                "horizon_months": 24,
+                "household_size": 1,
+                "household_monthly_income": 3_000_000,
+                "financial_income_taxed": False,
+                "is_sme_employee": True,
+            }
+        )
+        policy = map_youth_policy_row(
+            {
+                "plcyNo": "P3", "plcyNm": "청년미래적금",
+                "plcyExplnCn": "24개월 만기, 월 50만원 한도",
+                "plcySprtCn": "일반형 6%, 우대형 12% 정부기여금 지원",
+                "earnEtcCn": "가구 중위소득 200% 이하",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+        assert policy is not None
+        self.assertEqual(policy.benefit_tier, "preferential")
+
+        scenarios = policy_candidate_scenarios(
+            request, _FakeRetriever(), _FakePolicyRepository([policy])
+        )
+
+        self.assertEqual(len(scenarios), 1)
+        monthly = min(request.monthly_budget, policy.monthly_limit)
+        principal = request.monthly_budget * request.horizon_months
+        preferential_support = round(monthly * policy.maturity_months * 0.12)
+        standard_support = round(monthly * policy.maturity_months * 0.06)
+        self.assertEqual(scenarios[0].expected_base, principal + preferential_support)
+        self.assertNotEqual(scenarios[0].expected_base, principal + standard_support)
 
     def test_median_income_limit_uses_year_and_household_size(self):
         request = RoadmapRequest(
