@@ -82,6 +82,9 @@ _PRODUCT_RANKING = re.compile(
     r"(?:순위|순서|정렬|랭킹).{0,20}(?:상품|적금|정책|조건)"
 )
 _DONT_KNOW = re.compile(r"몰라|모름|모르겠|모르는데|알\s*수\s*없")
+# 정책 자격 예/아니오 질문에 대한 짧은 구어체 단답(예: "응 있어", "아니요") 인식용.
+_YES_ANSWER = re.compile(r"^(네|응|예|어|맞아|맞습니다|맞아요|그래|그렇습니다)\b")
+_NO_ANSWER = re.compile(r"^(아니요|아니오|아뇨|아니야|아닙니다|아니)\b")
 
 INTENT_TOOLS = {
     ConversationIntent.CONDITION_CHANGE: ("condition_parser", "roadmap_calculators", "ranking"),
@@ -280,6 +283,15 @@ def apply_policy_answers(
     elif re.search(r"금융소득종합과세.{0,12}(?:있|맞|해당)", message):
         changes["financial_income_taxed"] = True
         descriptions.append("금융소득종합과세 이력 있음")
+    elif request.financial_income_taxed is None and "금융소득종합과세" in context:
+        # 직전에 이 질문을 물었다면 "응 있어"/"아니요" 같은 짧은 구어체 단답도 인식한다.
+        stripped = message.strip()
+        if _NO_ANSWER.search(stripped):
+            changes["financial_income_taxed"] = False
+            descriptions.append("금융소득종합과세 이력 없음")
+        elif _YES_ANSWER.search(stripped):
+            changes["financial_income_taxed"] = True
+            descriptions.append("금융소득종합과세 이력 있음")
     if re.search(
         r"중소기업.{0,10}(?:재직|다니).{0,10}(?:아니|않|안\s*(?:함|해|다님|다녀))"
         r"|중소기업.{0,15}안\s*(?:재직|다니|다녀)",
@@ -290,6 +302,14 @@ def apply_policy_answers(
     elif re.search(r"중소기업.{0,10}(?:재직|다니)", message):
         changes["is_sme_employee"] = True
         descriptions.append("중소기업 재직")
+    elif request.is_sme_employee is None and "중소기업" in context:
+        stripped = message.strip()
+        if _NO_ANSWER.search(stripped):
+            changes["is_sme_employee"] = False
+            descriptions.append("중소기업 재직 아님")
+        elif _YES_ANSWER.search(stripped):
+            changes["is_sme_employee"] = True
+            descriptions.append("중소기업 재직")
     if not changes:
         return request, []
     updated = replace(request, **changes)

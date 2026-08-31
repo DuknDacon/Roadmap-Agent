@@ -133,6 +133,33 @@ def test_bare_number_ignored_when_no_pending_household_question():
     assert changes == []
 
 
+def test_bare_yes_answers_pending_financial_income_question():
+    context = "나는 왜 우대형이 아니야? 최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+    updated, changes = apply_policy_answers(base_request(), "응 있어", context=context)
+    assert updated.financial_income_taxed is True
+    assert changes == ["금융소득종합과세 이력 있음"]
+
+
+def test_bare_no_answers_pending_financial_income_question():
+    context = "나는 왜 우대형이 아니야? 최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+    updated, changes = apply_policy_answers(base_request(), "아니요", context=context)
+    assert updated.financial_income_taxed is False
+    assert changes == ["금융소득종합과세 이력 없음"]
+
+
+def test_bare_yes_answers_pending_sme_employee_question():
+    context = "나는 왜 우대형이 아니야? 현재 중소기업에 재직 중인가요?"
+    updated, changes = apply_policy_answers(base_request(), "네", context=context)
+    assert updated.is_sme_employee is True
+    assert changes == ["중소기업 재직"]
+
+
+def test_bare_answer_ignored_when_no_pending_boolean_question():
+    updated, changes = apply_policy_answers(base_request(), "응 있어")
+    assert updated.financial_income_taxed is None
+    assert changes == []
+
+
 def test_policy_followup_answer_routes_back_to_policy_eligibility():
     request = base_request(is_sme_employee=False)
     context = "나는 왜 우대형이 아니야? 가구 전체의 월소득은 얼마인가요?"
