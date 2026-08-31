@@ -349,8 +349,8 @@ class GeminiRoadmapExplainer:
             if fallback_answer:
                 return (
                     fallback_answer
-                    + " 다만 공식 웹 검색에서도 추가 운영지침을 확인하지 못해 "
-                    "정부기여금 변경 여부는 확정할 수 없습니다."
+                    + " 다만 공식 웹 검색에서도 추가 근거를 확인하지 못해 "
+                    "이 부분은 확정할 수 없습니다."
                 )
             return "공식 웹 출처에서 질문을 확인할 근거를 찾지 못했습니다. 최신 상품 약관이나 운영기관에 확인해 주세요."
         final = answer + "\n\n공식 출처: " + " · ".join(sources[:3])

@@ -177,7 +177,7 @@ class GeminiTest(unittest.TestCase):
         answer = explainer.answer_financial_question("대기업으로 이직하면?", evidence)
 
         self.assertIn("가입일 직전 과세기간", answer)
-        self.assertIn("정부기여금 변경 여부는 확정할 수 없습니다", answer)
+        self.assertIn("이 부분은 확정할 수 없습니다", answer)
 
     def test_web_search_quota_is_shared_across_instances_via_db(self):
         """다중 워커·인스턴스 시나리오: 같은 DB를 보는 서로 다른 explainer도 월 한도를 공유해야 한다."""
