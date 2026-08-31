@@ -173,6 +173,69 @@ def test_policy_followup_answer_routes_back_to_policy_eligibility():
     assert response.intent == ConversationIntent.POLICY_ELIGIBILITY
 
 
+class ConditionalPolicies:
+    """financial_income_taxed=True면 청년미래적금이 자격 후보에서 아예 빠진다
+    (실제 repositories.py의 financial_income_taxed=True → eligible=False 동작을
+    후보 목록 단위로 흉내). estimated_support를 높게 둬 존재할 때는 항상 추천에
+    선정되도록 한다."""
+
+    def find_candidates(self, request):
+        candidates = [
+            PolicyBenefit("p2", "일반정책", True, 500_000, 50_000, 36, "url2", "2026", "항상 가능"),
+        ]
+        if request.financial_income_taxed is not True:
+            candidates.append(
+                PolicyBenefit(
+                    "p1", "청년미래적금", True, 500_000, 300_000, 36, "url", "2026",
+                    "금융소득 조건부",
+                )
+            )
+        return candidates
+
+
+def test_policy_eligibility_answer_actually_recomputes_roadmap_not_just_text():
+    """정책 자격 질문에 답하면 채팅 텍스트만 새로 만드는 게 아니라 실제로
+    run_roadmap을 다시 호출해 로드맵(추천 상품)까지 바뀌어야 한다 — 텍스트로만
+    설명하고 result를 그대로 통과시키던 기존 버그의 회귀 테스트."""
+    from roadmap_agent.orchestrator import run_roadmap
+
+    def titles(result):
+        return {result.recommended.title, *(item.title for item in result.alternatives)}
+
+    # 1인가구 + 소득 지정 → 가구소득이 자동 계산돼(household income gap 없음)
+    # financial_income_taxed만 유일한 미확정 필드로 남는다.
+    request = base_request(
+        is_sme_employee=False, household_size=1,
+        previous_annual_income=40_000_000, current_annual_income=40_000_000,
+    )
+    initial_result = run_roadmap(
+        request,
+        policy_repository=ConditionalPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=Retriever(),
+    )
+    assert any("청년미래적금" in title for title in titles(initial_result))
+
+    context = (
+        "나는 왜 우대형이 아니야? "
+        "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+    )
+    response = execute_conversation(
+        request, initial_result, "응 있어",
+        run_roadmap_fn=run_roadmap,
+        policy_repository=ConditionalPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=Retriever(),
+        context=context,
+    )
+
+    assert response.request.financial_income_taxed is True
+    # 재계산된 결과에서는 청년미래적금이 자격에서 빠져 후보 어디에도 없어야 한다
+    # (재계산이 실제로 일어났다는 증거 — 텍스트만 새로 만들었다면 이전 result가
+    # 그대로 통과되어 청년미래적금이 여전히 후보에 남아있게 된다).
+    assert not any("청년미래적금" in title for title in titles(response.result))
+
+
 def test_dont_know_reply_explains_impact_instead_of_generic_fallback():
     context = "나는 왜 우대형이 아니야? 가구 전체의 월소득은 얼마인가요?"
     plan = plan_conversation(base_request(), "잘 모르겠어", context=context)

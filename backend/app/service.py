@@ -5,6 +5,7 @@ import calendar
 from datetime import date, datetime, timezone
 from hashlib import sha1
 
+from roadmap_agent.conversation import FINANCIAL_INCOME_TAXED_QUESTION
 from roadmap_agent.domain import RiskProfile, RoadmapRequest, Scenario
 from roadmap_agent.orchestrator import build_conversation_graph, run_roadmap
 
@@ -142,11 +143,32 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         is_employed=payload.employed,
         employment_type=payload.employment_type,
         is_sme_employee=payload.is_sme_employee,
+        financial_income_taxed=payload.financial_income_taxed,
         household_size=payload.household_size,
         is_married=payload.marital_status == "married",
         question=payload.question,
     )
     runtime = get_runtime()
+
+    # 로드맵을 계산하기 전에, DB 매칭 후보 중 사용자 입력만으로는 판정 못 하는
+    # 필드(financial_income_taxed)가 걸리는 게 있으면 로드맵 없이 먼저 물어본다.
+    # 순수 DB 조회라 LLM 호출이 없고, 답변되면(다음 호출부터 필드가 채워짐)
+    # 이 체크는 더 이상 걸리지 않아 이후 흐름은 지금과 동일하다.
+    if request.financial_income_taxed is None and runtime.policy_repository is not None:
+        candidates = runtime.policy_repository.find_candidates(request)
+        if any(
+            "financial_income_taxed" in candidate.missing_qualification_fields
+            for candidate in candidates
+        ):
+            return RoadmapResponse(
+                summary="맞춤 로드맵을 만들기 전에 확인이 필요합니다.",
+                chatReply=FINANCIAL_INCOME_TAXED_QUESTION,
+                notice="추가 정보를 답변하시면 그 즉시 로드맵을 만들어 드립니다.",
+                generatedAt=datetime.now(timezone.utc),
+                conversationStatus="needs_input",
+                missingFields=["financial_income_taxed"],
+            )
+
     result = run_roadmap(
         request,
         policy_repository=runtime.policy_repository,

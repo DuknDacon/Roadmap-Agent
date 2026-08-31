@@ -137,9 +137,13 @@ def _matches_current_scenario(result: RoadmapResult | None, message: str) -> boo
     )
 
 
+# 로드맵 생성 전 사전 체크(backend/app/service.py)에서도 그대로 재사용하는
+# 문구 — 여러 곳에 복붙하지 않도록 여기 하나만 둔다.
+FINANCIAL_INCOME_TAXED_QUESTION = "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+
 _PENDING_POLICY_QUESTIONS = (
     "가구 전체의 월소득은 얼마인가요?",
-    "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?",
+    FINANCIAL_INCOME_TAXED_QUESTION,
     "현재 중소기업에 재직 중인가요?",
 )
 
@@ -245,7 +249,7 @@ def policy_qualification_gaps(
     if request.financial_income_taxed is None and (
         awaiting or re.search(r"(우대형|금융소득|자격)", message)
     ):
-        gaps.append("최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?")
+        gaps.append(FINANCIAL_INCOME_TAXED_QUESTION)
     if request.is_sme_employee is None and (
         awaiting or re.search(r"(우대형|중소기업)", message)
     ):
@@ -751,6 +755,18 @@ def execute_conversation(
             plan.tools,
         ))
 
+    # 이번 답변으로 실제 필드가 바뀌었으면(예: financial_income_taxed 확정) 텍스트
+    # 설명만 새로 만들 게 아니라 로드맵 자체를 재계산해야 한다 — 그래야 오른쪽
+    # 로드맵 패널(추천 상품·예상액)도 답변을 반영해 바뀐다. 그전까지는 이 분기가
+    # `result`를 그대로 통과시켜, 사용자가 답해도 패널이 안 바뀌는 버그가 있었다.
+    if policy_changes:
+        result = run_roadmap_fn(
+            updated_policy_request,
+            policy_repository=policy_repository,
+            savings_repository=savings_repository,
+            retriever=retriever,
+            explainer=explainer,
+        )
     policies = policy_repository.find_candidates(replace(updated_policy_request, question=message))
     eligible = [item for item in policies if item.eligible]
     if eligible:

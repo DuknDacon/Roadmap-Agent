@@ -23,6 +23,7 @@ class RoadmapCreateRequest(ApiModel):
     employed: bool
     employment_type: str | None = Field(default=None, alias="employmentType")
     is_sme_employee: bool | None = Field(default=None, alias="isSmeEmployee")
+    financial_income_taxed: bool | None = Field(default=None, alias="financialIncomeTaxed")
     monthly_take_home: int | None = Field(default=None, alias="monthlyTakeHome", gt=0)
     monthly_budget: int = Field(alias="monthlyBudget", gt=0)
     target_date: date = Field(alias="targetDate")
@@ -75,8 +76,8 @@ class ScenarioResponse(ApiModel):
 
 
 class RoadmapResponse(ApiModel):
-    recommended: ScenarioResponse
-    alternative: ScenarioResponse
+    recommended: ScenarioResponse | None = None
+    alternative: ScenarioResponse | None = None
     alternatives: list[ScenarioResponse] = Field(default_factory=list)
     summary: str
     explanation: str | None = None
@@ -88,6 +89,9 @@ class RoadmapResponse(ApiModel):
     conversation_status: str | None = Field(default=None, alias="conversationStatus")
     conversation_intent: str | None = Field(default=None, alias="conversationIntent")
     request_patch: "RoadmapRequestPatch | None" = Field(default=None, alias="requestPatch")
+    # 로드맵 생성 전 DB 매칭 후보에 사용자 입력만으로는 판정 못 하는 필드가
+    # 있으면(예: financial_income_taxed) 로드맵 없이 이 값만 채워 반환한다.
+    missing_fields: list[str] = Field(default_factory=list, alias="missingFields")
 
 
 class RoadmapRequestPatch(ApiModel):
