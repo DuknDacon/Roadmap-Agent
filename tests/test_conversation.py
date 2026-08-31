@@ -6,6 +6,7 @@ from roadmap_agent.conversation import (
     classify_intent,
     apply_policy_answers,
     execute_conversation,
+    input_gap_reply,
     plan_conversation,
     policy_qualification_gaps,
     ConversationPlan,
@@ -82,6 +83,25 @@ def test_classifies_supported_intents():
     assert classify_intent(
         "조건은 그대로인데, 이 외의 적금에 대한 순위를 알고싶어"
     ) == ConversationIntent.PRODUCT_RANKING
+    # 8종 의도 중 그동안 테스트가 없던 마지막 하나(INPUT_COMPLETION).
+    assert classify_intent("내가 뭘 더 입력해야 해?") == ConversationIntent.INPUT_COMPLETION
+
+
+def test_input_completion_gap_reply_lists_missing_policy_fields():
+    request = base_request(
+        household_monthly_income=None, financial_income_taxed=None, is_sme_employee=None,
+    )
+    reply = input_gap_reply(request)
+    assert "가구 전체 월소득" in reply
+    assert "금융소득종합과세 이력" in reply
+    assert "중소기업 재직 여부" in reply
+
+
+def test_input_completion_gap_reply_reports_all_filled_when_nothing_missing():
+    request = base_request(
+        household_monthly_income=3_000_000, financial_income_taxed=False, is_sme_employee=False,
+    )
+    assert input_gap_reply(request) == "현재 기본 계산에 필요한 입력은 모두 갖춰져 있습니다."
 
 
 def test_product_and_bank_names_are_current_result_questions():
