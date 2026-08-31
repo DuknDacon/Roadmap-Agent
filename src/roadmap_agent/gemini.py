@@ -179,8 +179,11 @@ class GeminiRoadmapExplainer:
                     "request.question이 비어 있으면 chat_reply는 null, 질문이 있으면 질문에 대한 "
                     "간결한 한국어 답변을 넣는다. 질문에 대안·회사명·상품명이 있으면 반드시 해당 "
                     "시나리오의 값만 사용한다. 월 납입한도 질문은 해당 시나리오의 monthly_limit만 "
-                    "답하고 다른 금융제도 설명을 섞지 않는다. 키는 recommended_reason, "
-                    "alternative_reason, chat_reply다."
+                    "답하고 다른 금융제도 설명을 섞지 않는다. chat_reply는 채팅 말풍선에 표시되고 "
+                    "로드맵 상세 카드는 화면 별도 영역(대화창 옆)에 함께 표시되므로, '아래', '위', "
+                    "'다음과 같습니다' 처럼 특정 화면 위치를 가리키는 표현은 쓰지 않는다 — 대신 "
+                    "'추천 로드맵을 확인해 보세요'처럼 위치를 지칭하지 않는 표현을 쓴다. 키는 "
+                    "recommended_reason, alternative_reason, chat_reply다."
                 ),
                 max_output_tokens=1200,
                 response_mime_type="application/json",

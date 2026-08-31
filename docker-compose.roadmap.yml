@@ -14,14 +14,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: roadmap-api:v1
+    image: roadmap-api:v5
     container_name: roadmap-api
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      SHARED_DB_PATH: /app/data/shared/seedup.sqlite
-      CONVERSATION_STORE_PATH: /app/data/shared/seedup.sqlite
+      # 정형 참조 데이터는 성필님이 새로 적재한 최종 데이터 파일을 직접 가리킨다
+      # (기존 seedup.sqlite는 대화 체크포인트와 섞여 있던 예전 파일이라 건드리지 않고 그대로 둔다).
+      SHARED_DB_PATH: /app/data/shared/seedup_data.sqlite
+      # 대화 체크포인트(LangGraph)는 참조 데이터와 분리된 별도 파일에 저장한다.
+      # 참조 데이터를 갱신할 때마다 대화 이력까지 지워야 하는 문제를 없애기 위함.
+      CONVERSATION_STORE_PATH: /app/data/shared/conversations.sqlite
       RAG_INDEX_DIR: /app/data/rag_index
     ports:
       - "127.0.0.1:8001:8001"
