@@ -77,11 +77,17 @@ def median_income_monthly(year: int, household_size: int) -> int | None:
 
 
 def median_income_limit(text: str, year: int, household_size: int) -> tuple[float, int] | None:
-    match = MEDIAN_INCOME_PERCENT_RE.search(text)
+    matches = MEDIAN_INCOME_PERCENT_RE.findall(text)
     base = median_income_monthly(year, household_size)
-    if match is None or base is None:
+    if not matches or base is None:
         return None
-    ratio = float(match.group(1)) / 100
+    distinct_ratios = {float(value) for value in matches}
+    if len(distinct_ratios) > 1:
+        # 가구유형(독립가구/원가구)이나 신청유형(Ⅰ/Ⅱ유형)별로 기준 비율이 갈리는
+        # 정책은 자유 서술 텍스트만으로 어느 비율이 적용되는지 판별할 수 없다.
+        # 임의로 하나를 골라 확정 판정을 내리는 대신 확인 필요로 남긴다.
+        return None
+    ratio = distinct_ratios.pop() / 100
     return ratio, round(base * ratio)
 
 

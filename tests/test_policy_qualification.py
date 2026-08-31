@@ -54,3 +54,16 @@ def test_calculates_policy_percentage_limit():
 def test_unknown_year_or_missing_percentage_is_not_guessed():
     assert median_income_monthly(2027, 1) is None
     assert median_income_limit("가구 중위소득 기준", 2026, 1) is None
+
+
+def test_multiple_distinct_percentages_are_not_arbitrarily_picked():
+    """실제 온통청년 데이터: 가구유형/신청유형별로 비율이 다른 정책(예: 인천시 청년월세
+    지원사업 '청년독립가구 60% / 원가구 100%')은 어느 쪽이 적용되는지 텍스트만으로
+    판별할 수 없으므로, 임의로 하나를 골라 확정 판정하지 않고 확인 필요로 남긴다."""
+    text = "소득 : (청년독립가구) 기준 중위소득 60%이하 (원가구) 기준 중위소득 100% 이하"
+    assert median_income_limit(text, 2026, 1) is None
+
+
+def test_repeated_identical_percentage_is_still_used():
+    text = "가구 중위소득 60% 이하 (기준 중위소득 60% 이하 유지)"
+    assert median_income_limit(text, 2026, 1) == (0.6, 1_538_543)

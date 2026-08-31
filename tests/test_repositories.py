@@ -85,6 +85,26 @@ class RepositoriesTest(unittest.TestCase):
         self.assertEqual(policy.estimated_support, 2_400_000)
         self.assertEqual(policy.support_rate, 1.0)
 
+    def test_youth_policy_prefers_application_url_over_reference_url(self):
+        """실제 데이터: aplyUrlAddr(신청 URL)이 있으면 refUrlAddr(참고 URL, 대개
+        소관기관 홈페이지)보다 우선해야 사용자가 실제 신청 페이지로 이동한다."""
+        policy = map_youth_policy_row(
+            {
+                "plcyNo": "P3", "plcyNm": "산림창업가 캠프",
+                "plcyExplnCn": "24개월 상품",
+                "plcySprtCn": "월 10만원 저축 시 1:1 매칭 지원",
+                "sprtTrgtMinAge": "19", "sprtTrgtMaxAge": "34",
+                "aplyUrlAddr": "https://forms.gle/example",
+                "refUrlAddr1": "https://www.kofpi.or.kr",
+                "aplyYmd": "",
+            },
+            self.request,
+            as_of=date(2026, 8, 13),
+        )
+        self.assertIsNotNone(policy)
+        assert policy is not None
+        self.assertEqual(policy.source_url, "https://forms.gle/example")
+
     def test_closed_youth_policy_remains_comparable_but_marks_availability(self):
         policy = map_youth_policy_row(
             {

@@ -270,7 +270,15 @@ def map_youth_policy_row(
         monthly_limit=monthly,
         estimated_support=support,
         maturity_months=months,
-        source_url=str(row.get("source_url") or row.get("refUrlAddr1") or row.get("refUrlAddr2") or ""),
+        # 실제 신청 링크(aplyUrlAddr)가 있으면 그걸 우선한다 — 참고 URL(refUrlAddr*)은
+        # 대개 소관기관 홈페이지일 뿐 신청 페이지가 아니다(예: kofpi.or.kr).
+        source_url=str(
+            row.get("aplyUrlAddr")
+            or row.get("source_url")
+            or row.get("refUrlAddr1")
+            or row.get("refUrlAddr2")
+            or ""
+        ),
         effective_date=_date_value(row.get("lastMdfcnDt")) or str(as_of),
         reason="; ".join(reasons) or "명시된 기본조건 충족",
         application_open=application_open,
