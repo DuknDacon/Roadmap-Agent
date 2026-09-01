@@ -1,0 +1,18 @@
+{
+  "policy_id": "20260803005400213317",
+  "policy_name": "(광양시)광양청년꿈터 드림클래스",
+  "source_table": "youth_policy",
+  "content_hash": "sha256:9b18127e04e01e1d18fdb483ea42081f2596571491a35f37673ed0f1f6541a12",
+  "extracted_at": "2026-09-01T08:21:12.702493+00:00",
+  "extraction_model": "gemini-3.5-flash-lite",
+  "status": "verified",
+  "approved_by": "수빈",
+  "gates": [
+    {
+      "gate_id": "youth_db_registration",
+      "question": "광양청년꿈터 청년DB 또는 국무조정실 청년인재DB에 등록을 완료하셨습니까?",
+      "hint": "광양청년꿈터 청년DB 또는 국무조정실 청년인재DB 등록 완료자여야 신청할 수 있습니다.",
+      "source_excerpt": "광양청년꿈터 청년DB 및 국무조정실 청년인재DB 등록 완료자"
+    }
+  ]
+}

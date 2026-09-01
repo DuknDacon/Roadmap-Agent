@@ -7,6 +7,7 @@ from roadmap_agent.domain import Evidence, RiskProfile, RoadmapRequest, RoadmapR
 from roadmap_agent.gemini import (
     GeminiConversationPlanner,
     GeminiEmbeddingClient,
+    GeminiPolicyGateExtractor,
     GeminiRoadmapExplainer,
 )
 from roadmap_agent.conversation import ConversationIntent
@@ -45,6 +46,56 @@ class GeminiTest(unittest.TestCase):
         self.assertEqual(len(embedder.embed_documents(["문서1", "문서2"])), 2)
         self.assertEqual(models.embed_calls[0]["config"].task_type, "RETRIEVAL_QUERY")
         self.assertEqual(models.embed_calls[1]["config"].task_type, "RETRIEVAL_DOCUMENT")
+
+    def test_policy_gate_extractor_parses_gates(self):
+        models = SimpleNamespace(
+            generate_content=lambda **kwargs: SimpleNamespace(
+                text=(
+                    '{"gates":[{"gate_id":"artist_certification",'
+                    '"question":"예술활동증명을 받으셨나요?","hint":"문체부 인증",'
+                    '"source_excerpt":"예술활동증명을 완료한 예술인"}]}'
+                )
+            )
+        )
+        extractor = GeminiPolicyGateExtractor(client=SimpleNamespace(models=models))
+
+        gates = extractor.extract(policy_id="P1", policy_name="테스트 상품", document="예술활동증명을 완료한 예술인")
+        self.assertEqual(len(gates), 1)
+        self.assertEqual(gates[0]["gate_id"], "artist_certification")
+
+    def test_policy_gate_extractor_strips_markdown_code_fence(self):
+        """response_mime_type="application/json"을 줘도 가끔 ```json 코드펜스로
+        감싸서 오는 응답을 실제로 관찰했다 — 방어적으로 벗겨내는지 확인."""
+        models = SimpleNamespace(
+            generate_content=lambda **kwargs: SimpleNamespace(
+                text='```json\n{"gates":[]}\n```'
+            )
+        )
+        extractor = GeminiPolicyGateExtractor(client=SimpleNamespace(models=models))
+
+        gates = extractor.extract(policy_id="P1", policy_name="테스트 상품", document="문서")
+        self.assertEqual(gates, [])
+
+    def test_policy_gate_extractor_raises_clear_error_on_malformed_json(self):
+        """상품 하나의 응답이 중간에 잘려도(실측: max_output_tokens 부족으로
+        JSON이 잘린 사례) 어떤 상품에서 실패했는지 알 수 있는 에러를 던져야
+        한다 — 배치 스크립트가 이 상품만 건너뛰고 계속 진행할 수 있게."""
+        models = SimpleNamespace(
+            generate_content=lambda **kwargs: SimpleNamespace(
+                text='{"gates":[{"gate_id":"broken"'  # 잘린 JSON
+            )
+        )
+        extractor = GeminiPolicyGateExtractor(client=SimpleNamespace(models=models))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            extractor.extract(policy_id="P404", policy_name="테스트 상품", document="문서")
+        self.assertIn("P404", str(ctx.exception))
+
+    def test_policy_gate_extractor_returns_empty_for_blank_document(self):
+        extractor = GeminiPolicyGateExtractor(client=SimpleNamespace(models=None))
+        self.assertEqual(
+            extractor.extract(policy_id="P1", policy_name="테스트 상품", document="   "), []
+        )
 
     def test_explainer_returns_structured_reasons_without_changing_result(self):
         models = FakeModels()

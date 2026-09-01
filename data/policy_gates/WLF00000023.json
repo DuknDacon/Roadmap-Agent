@@ -1,0 +1,24 @@
+{
+  "policy_id": "WLF00000023",
+  "policy_name": "농어가목돈마련저축 저축장려금 지급",
+  "source_table": "welfare_service",
+  "content_hash": "sha256:02e35d559e64d2dad2f1af36c41612bb44bcf02f3bfdfec23531c6bb4ca7a3c8",
+  "extracted_at": "2026-09-01T08:21:25.678577+00:00",
+  "extraction_model": "gemini-3.5-flash-lite",
+  "status": "verified",
+  "approved_by": "수빈",
+  "gates": [
+    {
+      "gate_id": "is_farmer_or_fisherman",
+      "question": "농업인, 임업인 또는 어업인에 해당하시나요?",
+      "hint": "농어목돈마련저축 저축장려금 지원을 받기 위해서는 농어민 자격을 갖추어야 합니다.",
+      "source_excerpt": "농업인(임업인 포함), 어업인으로 「농어가목돈마련저축에 관한 법률 시행령」 제2조에 해당하는 사람을 대상으로 지원합니다."
+    },
+    {
+      "gate_id": "no_other_full_time_job",
+      "question": "농어업 외의 다른 분야에서 상시 근로하고 있지 않으신가요?",
+      "hint": "농어민으로서 종사하는 분야 외의 분야에서 상시 근로하고 있는 사람은 가입대상에서 제외됩니다.",
+      "source_excerpt": "농어민으로서 종사하는 분야 외의 분야에서 상시 근로하고 있는 사람"
+    }
+  ]
+}

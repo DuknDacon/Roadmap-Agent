@@ -7,6 +7,7 @@ from app.runtime import Runtime
 from app.schemas import RoadmapCreateRequest
 import app.service as service
 
+from roadmap_agent.dynamic_gates import DynamicGate, DynamicGateRegistry
 from roadmap_agent.ports import PolicyBenefit
 
 
@@ -112,6 +113,33 @@ class PreviousIncomeGapPolicies:
                 policy_id="P4",
                 name="소득상한 있는 정책상품",
                 eligible=True,
+                monthly_limit=300_000,
+                estimated_support=500_000,
+                maturity_months=36,
+                source_url="",
+                effective_date="2026-08-31",
+                reason="테스트용",
+                missing_qualification_fields=missing,
+            )
+        ]
+
+
+class DynamicGateGapPolicies:
+    """DynamicGateRegistry가 발견한, 4개 하드코딩 필드를 넘어서는 예/아니오
+    게이트(청년예술인 상품의 예술활동증명 같은)가 걸린 정책 후보 1건을 흉내."""
+
+    def find_candidates(self, request):
+        missing = (
+            ("P5:artist_certification",)
+            if request.dynamic_gate_answers.get("P5:artist_certification") is None
+            else ()
+        )
+        eligible = request.dynamic_gate_answers.get("P5:artist_certification") is not False
+        return [
+            PolicyBenefit(
+                policy_id="P5",
+                name="청년예술인 예술활동 적립계좌",
+                eligible=eligible,
                 monthly_limit=300_000,
                 estimated_support=500_000,
                 maturity_months=36,
@@ -383,5 +411,68 @@ def test_third_call_answering_both_fields_builds_real_roadmap():
     finally:
         service.get_runtime = original_runtime
 
+    assert response.conversation_status != "needs_input"
+    assert response.recommended is not None
+
+
+_GATE_REGISTRY = DynamicGateRegistry(
+    {
+        "P5": [
+            DynamicGate(
+                policy_id="P5",
+                gate_id="artist_certification",
+                question="예술활동증명을 받으셨나요?",
+                hint="문체부가 인정하는 예술인 신분 증빙입니다.",
+            )
+        ]
+    }
+)
+
+
+def test_first_call_asks_dynamic_gate_question_before_roadmap():
+    """DynamicGateRegistry가 발견한 게이트도 레거시 4개 필드와 똑같이, 로드맵 없이
+    먼저 구조화된 질문(missingFieldDetails)으로 되물어야 한다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=DynamicGateGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+        gate_registry=_GATE_REGISTRY,
+    )
+    try:
+        response = roadmap(RoadmapCreateRequest(**PAYLOAD, threadId=uuid4()))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.recommended is None
+    assert response.conversation_status == "needs_input"
+    assert response.missing_fields == ["P5:artist_certification"]
+    assert len(response.missing_field_details) == 1
+    detail = response.missing_field_details[0]
+    assert detail.field == "P5:artist_certification"
+    assert detail.question == "예술활동증명을 받으셨나요?"
+    assert detail.hint == "문체부가 인정하는 예술인 신분 증빙입니다."
+    assert detail.input_type == "boolean"
+    assert response.chat_reply == "예술활동증명을 받으셨나요?"
+
+
+def test_second_call_answering_dynamic_gate_false_builds_roadmap_with_ineligible_policy():
+    """"아니오" 답변은 프론트 구조화 폼(dynamicGateAnswers)을 통해서만 들어온다 —
+    LLM이 아니라 이 값을 보고 eligible이 계산돼야 한다(repositories.py가 담당)."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=DynamicGateGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+        gate_registry=_GATE_REGISTRY,
+    )
+    try:
+        payload = {**PAYLOAD, "dynamicGateAnswers": {"P5:artist_certification": False}}
+        response = roadmap(RoadmapCreateRequest(**payload, threadId=uuid4()))
+    finally:
+        service.get_runtime = original_runtime
+
+    # 게이트가 답변됐으니 사전 체크는 더 이상 걸리지 않고 실제 로드맵이 나와야 한다
+    # (이 상품 자체는 ineligible이지만, 그건 로드맵 계산 내부에서 걸러질 문제다).
     assert response.conversation_status != "needs_input"
     assert response.recommended is not None

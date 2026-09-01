@@ -1,0 +1,54 @@
+{
+  "policy_id": "20260625005400113245",
+  "policy_name": "사회연대경제 청년일경험",
+  "source_table": "youth_policy",
+  "content_hash": "sha256:9abab8e330ba54ec93b48d57d945c23e9032e9b8646a08ef3692e3225e6f2932",
+  "extracted_at": "2026-09-01T08:20:57.557014+00:00",
+  "extraction_model": "gemini-3.5-flash-lite",
+  "status": "verified",
+  "approved_by": "수빈",
+  "gates": [
+    {
+      "gate_id": "no_business_registration",
+      "question": "현재 사업자등록이 되어 있지 않으신가요?",
+      "hint": "사업자등록이 있는 자는 지원할 수 없습니다.",
+      "source_excerpt": "① 사업자등록이 있는 자"
+    },
+    {
+      "gate_id": "no_other_employment_support",
+      "question": "타 부처 또는 지방정부의 취업 관련 지원사업에 참여 중이 아니신가요?",
+      "hint": "타 부처 또는 지방정부의 취업 관련 지원사업에 참여 중인 자는 제외됩니다.",
+      "source_excerpt": "② 타 부처 또는 지방정부의 취업 관련 지원사업에 참여 중인 자"
+    },
+    {
+      "gate_id": "no_recent_company_employment",
+      "question": "참여 신청일 기준 6개월 내 해당 참여기업에서 근무한 이력이 없으신가요?",
+      "hint": "신청일 기준 6개월 내 해당 참여기업 근무 이력이 있는 자는 지원할 수 없습니다.",
+      "source_excerpt": "③ 참여 신청일 기준 6개월 내 해당 참여기업에서 근무한 이력이 있는 자"
+    },
+    {
+      "gate_id": "no_family_business_owner",
+      "question": "배우자, 직계존비속 또는 형제자매가 참여기업 사업주(대표자)가 아니신가요?",
+      "hint": "배우자, 직계존비속 또는 형제자매가 참여기업 사업주인 자는 제외됩니다.",
+      "source_excerpt": "④ 배우자, 직계존비속 또는 형제자매가 참여기업 사업주(대표자)인 자"
+    },
+    {
+      "gate_id": "no_fraudulent_participation",
+      "question": "허위 기타 부정한 방법으로 정부 일경험 사업에 참여한 적이 없으신가요?",
+      "hint": "허위 기타 부정한 방법으로 정부 일경험 사업에 참여한 자는 지원할 수 없습니다.",
+      "source_excerpt": "⑤ 허위 기타 부정한 방법으로 정부(국가·지방정부) 일경험 사업에 참여한 자"
+    },
+    {
+      "gate_id": "no_frequent_dropout",
+      "question": "단순 변심으로 청년 일경험 사업에 참여하여 2회 이상 중도이탈한 적이 없으신가요?",
+      "hint": "단순 변심으로 2회 이상 중도이탈한 자는 지원할 수 없습니다.",
+      "source_excerpt": "⑥ 단순 변심으로 청년 일경험 사업에 참여하여 2회 이상 중도이탈한 자"
+    },
+    {
+      "gate_id": "korean_nationality",
+      "question": "대한민국 국적을 보유하고 계신가요?",
+      "hint": "대한민국 국적을 보유하지 않은 자는 제외됩니다.",
+      "source_excerpt": "⑦ 대한민국 국적을 보유하지 않은 자"
+    }
+  ]
+}

@@ -8,6 +8,7 @@ from pathlib import Path
 import roadmap_agent
 from roadmap_agent.config import load_env_file
 from roadmap_agent.conversation_store import DEFAULT_TTL_SECONDS, SqliteConversationStore
+from roadmap_agent.dynamic_gates import DynamicGateRegistry
 from roadmap_agent.gemini import (
     GeminiConversationPlanner,
     GeminiEmbeddingClient,
@@ -46,6 +47,7 @@ class Runtime:
     explainer: RoadmapExplainer | None = None
     planner: object | None = None
     conversation_store: SqliteConversationStore | None = None
+    gate_registry: DynamicGateRegistry | None = None
 
 
 @lru_cache(maxsize=1)
@@ -57,10 +59,14 @@ def get_runtime() -> Runtime:
     explainer = None
     planner = None
 
+    # 로컬 파일 1회 읽기라 ENABLE_* 처럼 옵션화하지 않는다 — 옵션으로 두면
+    # PolicyRuleCatalog처럼 연결을 깜빡한 채 죽은 코드로 남을 위험이 있다.
+    gate_registry = DynamicGateRegistry.from_directory(agent_root / "data" / "policy_gates")
+
     shared_db_path = os.getenv("SHARED_DB_PATH")
     if shared_db_path:
         factory = sqlite_connection_factory_from_env()
-        policies = SqlitePolicyRepository(factory)
+        policies = SqlitePolicyRepository(factory, gate_registry=gate_registry)
         savings = SqliteSavingsProductRepository(factory)
 
     if _enabled("ENABLE_RAG") or _enabled("ENABLE_VECTOR_RAG"):
@@ -103,4 +109,5 @@ def get_runtime() -> Runtime:
         explainer=explainer,
         planner=planner,
         conversation_store=conversation_store,
+        gate_registry=gate_registry,
     )

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .domain import RoadmapRequest
+from .dynamic_gates import DynamicGateRegistry
 from .policy_qualification import effective_household_monthly_income, median_income_limit
 from .policy_rules import PolicyRuleCatalog
 from .ports import PolicyBenefit, SavingsProduct
@@ -127,8 +128,45 @@ def map_savings_row(row: Mapping[str, Any]) -> SavingsProduct | None:
     )
 
 
+def _apply_dynamic_gates(
+    policy_id: str,
+    gate_registry: DynamicGateRegistry | None,
+    request: RoadmapRequest,
+    eligible: bool,
+    missing_fields: list[str],
+    reasons: list[str],
+) -> bool:
+    """DynamicGateRegistry가 발견한 게이트(4개 하드코딩 필드를 넘어서는 예/아니오
+    자격조건)를 missing_fields/reasons/eligible에 접어넣는다. LLM은 이 gate.question을
+    만들었을 뿐이고, 답변을 보고 eligible을 계산하는 건 여기 이 코드다.
+    """
+    if gate_registry is None:
+        return eligible
+    for gate in gate_registry.gates_for(policy_id):
+        composite = DynamicGateRegistry.composite_id(policy_id, gate.gate_id)
+        answer = request.dynamic_gate_answers.get(composite)
+        if answer is None:
+            missing_fields.append(composite)
+            reasons.append(f"{gate.question} 확인 필요")
+        elif answer is False:
+            eligible = False
+            reasons.append(f"{gate.question} — 미충족")
+            # 이 게이트에서 이미 탈락이 확정됐다 — 같은 상품에 게이트가 더
+            # 있어도 더 물어보지 않는다(호출부도 eligible이었을 때만 이
+            # 함수를 부르므로, 여기 도달했다는 건 이번 게이트가 이 상품의
+            # 첫 탈락 사유라는 뜻).
+            break
+        else:
+            reasons.append(f"{gate.question} — 충족")
+    return eligible
+
+
 def map_youth_policy_row(
-    row: Mapping[str, Any], request: RoadmapRequest, *, as_of: date
+    row: Mapping[str, Any],
+    request: RoadmapRequest,
+    *,
+    as_of: date,
+    gate_registry: DynamicGateRegistry | None = None,
 ) -> PolicyBenefit | None:
     text = "\n".join(
         str(row.get(name) or "")
@@ -164,12 +202,28 @@ def map_youth_policy_row(
         else:
             reasons.append(f"연령조건 {min_age}~{max_age}세 충족")
 
+    # 지역조건은 나이와 마찬가지로 온보딩만으로 항상 판정 가능한 하드 조건이라
+    # 소득캡 확인보다 먼저 본다 — 아래 "확인 필요" 게이팅(if eligible: ...)이
+    # 지역 탈락 여부까지 반영하려면 순서가 이래야 한다.
+    zip_codes = {value.strip() for value in str(row.get("zipCd") or "").split(",") if value.strip()}
+    if zip_codes and request.region_code:
+        district = request.region_code.split(":")[-1]
+        if district not in zip_codes:
+            eligible = False
+            reasons.append("지역조건 불충족")
+
+    # 나이·지역처럼 온보딩만으로 항상 판정되는 조건이 이미 이 상품을 탈락시켰으면,
+    # 그 뒤로는 사용자에게 새 정보를 더 캐묻지 않는다 — 이미 못 받는 상품에
+    # 가구소득·금융소득종합과세 여부까지 계속 물어보면 불필요한 질문만 늘어난다.
+    # (이미 답변된 값으로 하는 부가 판정·안내 문구는 계속 반영한다 — 어차피
+    # 질문이 아니라 정보 전달이라 여기서 막을 이유가 없다.)
     max_income = _number(row.get("earnMaxAmt")) or 0
     taxable_income = request.previous_annual_income
     if max_income:
         if taxable_income is None:
-            missing_fields.append("previous_annual_income")
-            reasons.append("직전년도 과세소득 확인 필요")
+            if eligible:
+                missing_fields.append("previous_annual_income")
+                reasons.append("직전년도 과세소득 확인 필요")
         elif taxable_income > max_income * 10_000:
             eligible = False
             reasons.append("직전년도 과세소득 상한 초과")
@@ -184,13 +238,6 @@ def map_youth_policy_row(
         if change / max(request.previous_annual_income, 1) >= 0.2:
             reasons.append("현재 예상소득 변동폭이 커 기준연도별 자격 재확인 필요")
 
-    zip_codes = {value.strip() for value in str(row.get("zipCd") or "").split(",") if value.strip()}
-    if zip_codes and request.region_code:
-        district = request.region_code.split(":")[-1]
-        if district not in zip_codes:
-            eligible = False
-            reasons.append("지역조건 불충족")
-
     application_open = _application_open(row.get("aplyYmd"), as_of)
     if not application_open:
         reasons.append("현재 확인된 신청기간은 종료됨")
@@ -198,11 +245,13 @@ def map_youth_policy_row(
     if "중위소득" in income_text:
         household_income = effective_household_monthly_income(request)
         if household_income is None:
-            missing_fields.append("household_monthly_income")
-            reasons.append("가구 중위소득 판정을 위한 월소득 입력 필요")
+            if eligible:
+                missing_fields.append("household_monthly_income")
+                reasons.append("가구 중위소득 판정을 위한 월소득 입력 필요")
         elif request.household_size is None:
-            missing_fields.append("household_size")
-            reasons.append("가구 중위소득 판정을 위한 가구원 수 입력 필요")
+            if eligible:
+                missing_fields.append("household_size")
+                reasons.append("가구 중위소득 판정을 위한 가구원 수 입력 필요")
         else:
             income_limit = median_income_limit(income_text, as_of.year, request.household_size)
             if income_limit is None:
@@ -227,8 +276,9 @@ def map_youth_policy_row(
         or "미래적금" in str(row.get("plcyNm") or "")
     ):
         if request.financial_income_taxed is None:
-            missing_fields.append("financial_income_taxed")
-            reasons.append("금융소득종합과세 대상 여부 입력 필요")
+            if eligible:
+                missing_fields.append("financial_income_taxed")
+                reasons.append("금융소득종합과세 대상 여부 입력 필요")
         elif request.financial_income_taxed:
             eligible = False
             reasons.append("금융소득종합과세 이력으로 과세특례 적용 제한")
@@ -237,8 +287,9 @@ def map_youth_policy_row(
     benefit_tier = "standard"
     if "우대형" in text:
         if request.is_sme_employee is None:
-            missing_fields.append("is_sme_employee")
-            reasons.append("우대형 판정을 위한 중소기업 재직 여부 입력 필요")
+            if eligible:
+                missing_fields.append("is_sme_employee")
+                reasons.append("우대형 판정을 위한 중소기업 재직 여부 입력 필요")
         elif request.is_sme_employee:
             benefit_tier = "preferential_possible"
             reasons.append("중소기업 재직조건 충족, 우대형 세부 자격 확인 필요")
@@ -248,6 +299,12 @@ def map_youth_policy_row(
         reasons.append("취급 금융기관 금리 추가 정보 필요(현재 예상액에는 은행이자 미포함)")
     if row.get("addAplyQlfcCndCn") or row.get("ptcpPrpTrgtCn"):
         reasons.append("추가 자격조건은 운영기관 확인 필요")
+
+    policy_id = str(row.get("plcyNo") or "")
+    if eligible:
+        eligible = _apply_dynamic_gates(
+            policy_id, gate_registry, request, eligible, missing_fields, reasons
+        )
 
     missing_fields = list(dict.fromkeys(missing_fields))
     needs_verification = any("확인 필요" in reason or "대조 필요" in reason for reason in reasons)
@@ -269,7 +326,7 @@ def map_youth_policy_row(
         benefit_tier = "preferential"
 
     return PolicyBenefit(
-        policy_id=str(row.get("plcyNo") or ""),
+        policy_id=policy_id,
         name=str(row.get("plcyNm") or ""),
         eligible=eligible,
         monthly_limit=monthly,
@@ -296,7 +353,11 @@ def map_youth_policy_row(
 
 
 def map_welfare_policy_row(
-    row: Mapping[str, Any], request: RoadmapRequest, *, as_of: date
+    row: Mapping[str, Any],
+    request: RoadmapRequest,
+    *,
+    as_of: date,
+    gate_registry: DynamicGateRegistry | None = None,
 ) -> PolicyBenefit | None:
     target = str(row.get("tgtrDtlCn") or "")
     benefit = str(row.get("alwServCn") or "")
@@ -326,13 +387,16 @@ def map_welfare_policy_row(
         # youth_policy와 동일한 방식(median_income_limit)으로 실제 소득 대비 비율을 계산한다.
         # 예전엔 "중위소득" 문구만 있으면 실제 비교 없이 무조건 eligible=False로 고정해,
         # 이 조건이 있는 welfare_service 레코드가 어떤 프로필로도 후보가 될 수 없었다.
+        # 나이 조건으로 이미 탈락(eligible=False)한 상품이면 추가로 캐묻지 않는다.
         household_income = effective_household_monthly_income(request)
         if household_income is None:
-            missing_fields.append("household_monthly_income")
-            reasons.append("가구 중위소득 판정을 위한 월소득 입력 필요")
+            if eligible:
+                missing_fields.append("household_monthly_income")
+                reasons.append("가구 중위소득 판정을 위한 월소득 입력 필요")
         elif request.household_size is None:
-            missing_fields.append("household_size")
-            reasons.append("가구 중위소득 판정을 위한 가구원 수 입력 필요")
+            if eligible:
+                missing_fields.append("household_size")
+                reasons.append("가구 중위소득 판정을 위한 가구원 수 입력 필요")
         else:
             income_limit = median_income_limit(target, as_of.year, request.household_size)
             if income_limit is None:
@@ -358,6 +422,12 @@ def map_welfare_policy_row(
         # "확인 필요" 상태로만 남기고 최종 판단은 운영기관에 위임한다(영구 배제하지 않음).
         reasons.append("대상자 특수조건(운영기관) 확인 필요")
 
+    policy_id = str(row.get("servId") or "")
+    if eligible:
+        eligible = _apply_dynamic_gates(
+            policy_id, gate_registry, request, eligible, missing_fields, reasons
+        )
+
     missing_fields = list(dict.fromkeys(missing_fields))
     needs_verification = any("확인 필요" in reason for reason in reasons)
     qualification_status = (
@@ -371,7 +441,7 @@ def map_welfare_policy_row(
     )
 
     return PolicyBenefit(
-        policy_id=str(row.get("servId") or ""),
+        policy_id=policy_id,
         name=str(row.get("servNm") or ""),
         eligible=eligible,
         monthly_limit=monthly,
@@ -421,10 +491,12 @@ class SqlitePolicyRepository:
         *,
         as_of: date | None = None,
         rule_catalog: PolicyRuleCatalog | None = None,
+        gate_registry: DynamicGateRegistry | None = None,
     ):
         self.connection_factory = connection_factory
         self.as_of = as_of or date.today()
         self.rule_catalog = rule_catalog
+        self.gate_registry = gate_registry
 
     def find_candidates(self, request: RoadmapRequest) -> list[PolicyBenefit]:
         with self.connection_factory() as connection:
@@ -433,12 +505,16 @@ class SqlitePolicyRepository:
                 ("0044002",),
             ).fetchall()
             youth = [
-                map_youth_policy_row(dict(row), request, as_of=self.as_of)
+                map_youth_policy_row(
+                    dict(row), request, as_of=self.as_of, gate_registry=self.gate_registry
+                )
                 for row in youth_rows
             ]
             welfare_rows = connection.execute("SELECT * FROM welfare_service").fetchall()
             welfare = [
-                map_welfare_policy_row(dict(row), request, as_of=self.as_of)
+                map_welfare_policy_row(
+                    dict(row), request, as_of=self.as_of, gate_registry=self.gate_registry
+                )
                 for row in welfare_rows
             ]
         candidates = [item for item in [*youth, *welfare] if item is not None]

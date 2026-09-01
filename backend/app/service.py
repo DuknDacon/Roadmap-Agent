@@ -17,6 +17,7 @@ from roadmap_agent.orchestrator import build_conversation_graph, run_roadmap
 from .schemas import (
     AllocationItem,
     EvidenceItem,
+    MissingFieldDetail,
     RoadmapCreateRequest,
     RoadmapResponse,
     RoadmapRequestPatch,
@@ -84,6 +85,12 @@ _PRELAUNCH_FIELD_QUESTIONS: dict[str, str] = {
     "household_monthly_income": HOUSEHOLD_MONTHLY_INCOME_QUESTION,
     "previous_annual_income": PREVIOUS_ANNUAL_INCOME_QUESTION,
 }
+_PRELAUNCH_FIELD_INPUT_TYPES: dict[str, str] = {
+    "financial_income_taxed": "boolean",
+    "is_sme_employee": "boolean",
+    "household_monthly_income": "number",
+    "previous_annual_income": "number",
+}
 
 
 def _prelaunch_missing_fields(request: RoadmapRequest, runtime) -> list[str]:
@@ -92,6 +99,10 @@ def _prelaunch_missing_fields(request: RoadmapRequest, runtime) -> list[str]:
     순수 DB 조회(policy_repository.find_candidates)만 쓰므로 LLM 호출이 없고
     수십 ms 안에 끝난다. 반환된 필드가 다음 호출에서 채워지면 그 필드는 더
     이상 어떤 후보의 missing_qualification_fields 에도 나타나지 않는다.
+
+    레거시 4개 필드명뿐 아니라, DynamicGateRegistry가 채운 합성 키
+    ("policy_id:gate_id")도 그대로 통과시킨다 — 두 종류 다
+    missing_qualification_fields 안에서는 구분 없는 opaque 문자열이다.
     """
     if runtime.policy_repository is None:
         return []
@@ -99,7 +110,43 @@ def _prelaunch_missing_fields(request: RoadmapRequest, runtime) -> list[str]:
     present = {
         field for candidate in candidates for field in candidate.missing_qualification_fields
     }
-    return [name for name in _PRELAUNCH_FIELD_QUESTIONS if name in present]
+    return [name for name in present if name in _PRELAUNCH_FIELD_QUESTIONS or ":" in name]
+
+
+def _missing_field_details(missing_fields: list[str], runtime) -> list[MissingFieldDetail]:
+    """missing_fields 각 항목을 프론트가 바로 렌더할 수 있는 질문 메타데이터로 바꾼다.
+
+    레거시 4개 필드는 _PRELAUNCH_FIELD_QUESTIONS에서, 동적 게이트(합성 키)는
+    gate_registry에서 찾는다 — 동적 게이트는 상품마다 달라 라우터에 미리
+    등록해둘 수 없으므로 여기서 직접 구조화된 형태로 실어 보낸다.
+    """
+    details: list[MissingFieldDetail] = []
+    for name in missing_fields:
+        if name in _PRELAUNCH_FIELD_QUESTIONS:
+            details.append(
+                MissingFieldDetail(
+                    field=name,
+                    question=_PRELAUNCH_FIELD_QUESTIONS[name],
+                    inputType=_PRELAUNCH_FIELD_INPUT_TYPES.get(name, "text"),
+                )
+            )
+            continue
+        if ":" in name and runtime.gate_registry is not None:
+            policy_id, gate_id = name.split(":", 1)
+            gate = next(
+                (g for g in runtime.gate_registry.gates_for(policy_id) if g.gate_id == gate_id),
+                None,
+            )
+            if gate is not None:
+                details.append(
+                    MissingFieldDetail(
+                        field=name,
+                        question=gate.question,
+                        hint=gate.hint or None,
+                        inputType="boolean",
+                    )
+                )
+    return details
 
 
 def _age(birth_date: date, as_of: date) -> int:
@@ -182,6 +229,7 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         household_size=payload.household_size,
         is_married=payload.marital_status == "married",
         question=payload.question,
+        dynamic_gate_answers=payload.dynamic_gate_answers,
     )
     runtime = get_runtime()
 
@@ -190,14 +238,15 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
     # 있음 — ProfileAskForm 은 fields 배열을 그대로 받아 한 카드에 렌더한다).
     missing_fields = _prelaunch_missing_fields(request, runtime)
     if missing_fields:
-        questions = [_PRELAUNCH_FIELD_QUESTIONS[name] for name in missing_fields]
+        details = _missing_field_details(missing_fields, runtime)
         return RoadmapResponse(
             summary="맞춤 로드맵을 만들기 전에 확인이 필요합니다.",
-            chatReply=" ".join(questions),
+            chatReply=" ".join(detail.question for detail in details),
             notice="추가 정보를 답변하시면 그 즉시 로드맵을 만들어 드립니다.",
             generatedAt=datetime.now(timezone.utc),
             conversationStatus="needs_input",
             missingFields=missing_fields,
+            missingFieldDetails=details,
         )
 
     result = run_roadmap(

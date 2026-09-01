@@ -42,6 +42,11 @@ class RoadmapCreateRequest(ApiModel):
     )
     question: str = Field(default="", max_length=1000)
     thread_id: UUID | None = Field(default=None, alias="threadId")
+    # "policy_id:gate_id" 합성 키 → 예/아니오. DynamicGateRegistry가 발견한,
+    # 4개 하드코딩 필드를 넘어서는 자격조건에 대한 사용자 답변.
+    dynamic_gate_answers: dict[str, bool] = Field(
+        default_factory=dict, alias="dynamicGateAnswers"
+    )
 
     @field_validator("target_date")
     @classmethod
@@ -80,6 +85,21 @@ class ScenarioResponse(ApiModel):
     monthly_limit: int | None = Field(default=None, alias="monthlyLimit")
 
 
+class MissingFieldDetail(ApiModel):
+    """profile_ask 로 렌더할 필드 하나의 질문 메타데이터.
+
+    레거시 4개 필드와 동적 게이트(합성 키 "policy_id:gate_id") 모두 이 형태로
+    통일해서 내려준다 — 라우터가 필드명마다 로컬 딕셔너리를 미리 등록해둘
+    필요 없이 그대로 렌더할 수 있게 하기 위함(동적 게이트는 상품마다 달라
+    라우터에 미리 등록해둘 수 없다).
+    """
+
+    field: str
+    question: str
+    hint: str | None = None
+    input_type: str = Field(default="boolean", alias="inputType")
+
+
 class RoadmapResponse(ApiModel):
     recommended: ScenarioResponse | None = None
     alternative: ScenarioResponse | None = None
@@ -97,6 +117,12 @@ class RoadmapResponse(ApiModel):
     # 로드맵 생성 전 DB 매칭 후보에 사용자 입력만으로는 판정 못 하는 필드가
     # 있으면(예: financial_income_taxed) 로드맵 없이 이 값만 채워 반환한다.
     missing_fields: list[str] = Field(default_factory=list, alias="missingFields")
+    # missing_fields와 같은 필드를 가리키지만 라우터/프론트가 바로 렌더할 수 있는
+    # 구조화된 질문 메타데이터(질문 문구·힌트·입력 타입)를 담는다. missing_fields는
+    # 하위호환을 위해 그대로 둔다.
+    missing_field_details: list[MissingFieldDetail] = Field(
+        default_factory=list, alias="missingFieldDetails"
+    )
 
 
 class RoadmapRequestPatch(ApiModel):

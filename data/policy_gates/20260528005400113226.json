@@ -1,0 +1,18 @@
+{
+  "policy_id": "20260528005400113226",
+  "policy_name": "(문체부) 청년예술인 예술활동 적립계좌",
+  "source_table": "youth_policy",
+  "content_hash": "sha256:6b6dc998742e315382c0ebab80f26872c741fc25a0d11db930ec06a5017ac19f",
+  "extracted_at": "2026-09-01T00:00:00Z",
+  "extraction_model": "hand-authored",
+  "status": "verified",
+  "approved_by": "수빈",
+  "gates": [
+    {
+      "gate_id": "artist_certification",
+      "question": "「예술인복지법」상 예술활동증명을 완료(신청일 기준 유효)하셨나요?",
+      "hint": "일반 예술활동증명 또는 신진예술인 예술활동증명을 완료한 예술인만 신청할 수 있어요. 없으면 이 상품은 신청할 수 없습니다.",
+      "source_excerpt": "「예술인복지법」상 예술활동증명을 완료한 예술인(신청일 기준 예술활동증명 유효자)"
+    }
+  ]
+}

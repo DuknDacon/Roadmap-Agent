@@ -1,0 +1,18 @@
+{
+  "policy_id": "20260722005400213266",
+  "policy_name": "(검단구) 청년 자격증 응시료 지원",
+  "source_table": "youth_policy",
+  "content_hash": "sha256:10b96c95177fe607abe7a7989a93d121b67e5694166f3435c5a851e12b736a1c",
+  "extracted_at": "2026-09-01T08:20:51.692946+00:00",
+  "extraction_model": "gemini-3.5-flash-lite",
+  "status": "verified",
+  "approved_by": "수빈",
+  "gates": [
+    {
+      "gate_id": "not_health_insurance_workplace_subscriber_or_business_owner",
+      "question": "건강보험 직장가입자 또는 개인사업자에 해당하지 않으십니까?",
+      "hint": "건강보험 직장가입자 및 개인사업자는 지원 대상에서 제외됩니다.",
+      "source_excerpt": "건강보험 직장가입자 및 개인사업자는 제외"
+    }
+  ]
+}

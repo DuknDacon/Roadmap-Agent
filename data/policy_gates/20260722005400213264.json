@@ -1,0 +1,18 @@
+{
+  "policy_id": "20260722005400213264",
+  "policy_name": "서울영커리언스 점프업(미래 청년 일자리 사업)",
+  "source_table": "youth_policy",
+  "content_hash": "sha256:009fa43a3cadba51b564396a7b8dc3aba9bbc5db74065359f7d7d8553cec4681",
+  "extracted_at": "2026-09-01T08:20:52.867103+00:00",
+  "extraction_model": "gemini-3.5-flash-lite",
+  "status": "verified",
+  "approved_by": "수빈",
+  "gates": [
+    {
+      "gate_id": "not_university_student",
+      "question": "현재 대학생 신분이 아니십니까?",
+      "hint": "대학생은 본 사업에 참여할 수 없습니다.",
+      "source_excerpt": "대학생 참여 불가"
+    }
+  ]
+}

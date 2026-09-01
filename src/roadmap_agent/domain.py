@@ -34,6 +34,9 @@ class RoadmapRequest:
     dependents: int | None = None
     is_married: bool | None = None
     question: str = ""
+    # "policy_id:gate_id" 합성 키 → 사용자가 답한 예/아니오. DynamicGateRegistry가
+    # 상품 원문에서 발견한, 4개 하드코딩 필드를 넘어서는 자격조건에 대한 답변.
+    dynamic_gate_answers: dict[str, bool] = field(default_factory=dict)
 
     def validate(self) -> None:
         if self.monthly_budget <= 0:

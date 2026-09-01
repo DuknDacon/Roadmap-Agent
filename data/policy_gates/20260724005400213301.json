@@ -1,0 +1,54 @@
+{
+  "policy_id": "20260724005400213301",
+  "policy_name": "(영종구) 인천시 청년월세 지원사업",
+  "source_table": "youth_policy",
+  "content_hash": "sha256:f1ddfa20bb5a8e6411548873651b8ae70ce7ac9fb3e17df8a76c34efb8a2fb94",
+  "extracted_at": "2026-09-01T08:21:07.390117+00:00",
+  "extraction_model": "gemini-3.5-flash-lite",
+  "status": "verified",
+  "approved_by": "수빈",
+  "gates": [
+    {
+      "gate_id": "not_living_with_parents",
+      "question": "부모와 함께 거주하지 않고 세대를 분리하셨나요?",
+      "hint": "부모와 함께 거주하거나 원가구와 세대분리를 하지 않은 자는 지원 대상에서 제외됩니다.",
+      "source_excerpt": "○부모와 함께 거주(원가구와 세대분리하지 않은 자)하는 경우"
+    },
+    {
+      "gate_id": "not_homeowner",
+      "question": "본인 명의의 주택(분양권, 입주권 포함)을 소유하고 있지 않으신가요?",
+      "hint": "주택 소유자(분양권, 입주권 포함)는 지원 대상에서 제외됩니다.",
+      "source_excerpt": "○주택 소유자(분양권, 입주권 포함)"
+    },
+    {
+      "gate_id": "not_renting_from_family",
+      "question": "직계존속, 형제, 자매 등 2촌 이내(배우자의 2촌 이내 혈족 포함)의 주택을 임차하지 않으셨나요?",
+      "hint": "2촌 이내 주택을 임차한 경우는 지원 대상에서 제외됩니다.",
+      "source_excerpt": "○직계존속, 형제, 자매 등 2촌 이내 주택을 임차한 경우(배우자의 2촌 이내 혈족 포함)"
+    },
+    {
+      "gate_id": "not_public_rental_housing",
+      "question": "공공주택특별법에 따른 공공임대주택에 거주하고 있지 않으신가요?",
+      "hint": "공공주택특별법에 따른 공공임대주택 거주자는 지원 대상에서 제외됩니다.",
+      "source_excerpt": "○공공주택특별법에 따른 공공임대주택 거주자"
+    },
+    {
+      "gate_id": "not_sublease",
+      "question": "1실(방)에 다수가 거주하는 방식의 전대차 계약이 아니신가요?",
+      "hint": "1실(방)에 다수가 거주하는 방식의 전대차인 경우는 지원 대상에서 제외됩니다.",
+      "source_excerpt": "○1실(방)에 다수가 거주하는 방식의 전대차인 경우"
+    },
+    {
+      "gate_id": "no_other_rent_subsidy",
+      "question": "국토부나 지자체의 다른 월세지원을 받고 있지 않으신가요?",
+      "hint": "국토부 또는 지자체에서 시행하는 월세지원 수혜 중인 자는 지원 대상에서 제외됩니다.",
+      "source_excerpt": "○국토부 또는 지자체에서 시행하는 월세지원 수혜 중 인자 등(수혜종료 후 신청가능)"
+    },
+    {
+      "gate_id": "no_prior_special_support",
+      "question": "기존 청년월세 한시 특별지원을 24회 모두 지원받지 않으셨나요?",
+      "hint": "기존 청년월세 한시 특별지원에서 24회를 모두 지원받은 사람은 지원 대상에서 제외됩니다.",
+      "source_excerpt": "○기존 청년월세 한시 특별지원에서 24회를 모두 지원받은 사람 등"
+    }
+  ]
+}

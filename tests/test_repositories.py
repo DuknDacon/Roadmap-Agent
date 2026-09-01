@@ -6,6 +6,7 @@ from pathlib import Path
 
 from roadmap_agent.agents import policy_candidate_scenarios
 from roadmap_agent.domain import RiskProfile, RoadmapRequest
+from roadmap_agent.dynamic_gates import DynamicGate, DynamicGateRegistry
 from roadmap_agent.repositories import (
     SqliteSavingsProductRepository,
     map_savings_row,
@@ -98,6 +99,140 @@ class RepositoriesTest(unittest.TestCase):
         self.assertEqual(policy.monthly_limit, 100_000)
         self.assertEqual(policy.estimated_support, 2_400_000)
         self.assertEqual(policy.support_rate, 1.0)
+
+    def _row_with_dynamic_gate(self):
+        return {
+            "plcyNo": "P1", "plcyNm": "매칭통장", "plcyExplnCn": "24개월 상품",
+            "plcySprtCn": "월 10만원 저축 시 1:1 매칭 지원",
+            "sprtTrgtMinAge": "19", "sprtTrgtMaxAge": "34",
+            "aplyYmd": "", "source_url": "https://example.test",
+        }
+
+    def test_dynamic_gate_unanswered_adds_composite_missing_field(self):
+        """LLM이 발견한 게이트(4개 하드코딩 필드를 넘어서는 조건)에 사용자가 아직
+        답하지 않았으면 "policy_id:gate_id" 합성 키가 missing_qualification_fields에
+        들어가야 한다 — 기존 4개 필드와 같은 방식(union 후 사전 체크에서 되묻기)."""
+        registry = DynamicGateRegistry(
+            {
+                "P1": [
+                    DynamicGate(
+                        policy_id="P1",
+                        gate_id="artist_certification",
+                        question="예술활동증명을 받으셨나요?",
+                        hint="문체부 인증입니다.",
+                    )
+                ]
+            }
+        )
+        policy = map_youth_policy_row(
+            self._row_with_dynamic_gate(), self.request, as_of=date(2026, 8, 13),
+            gate_registry=registry,
+        )
+        assert policy is not None
+        self.assertTrue(policy.eligible)
+        self.assertIn("P1:artist_certification", policy.missing_qualification_fields)
+        self.assertEqual(policy.qualification_status, "needs_input")
+
+    def test_dynamic_gate_answered_false_makes_ineligible(self):
+        """LLM은 질문만 만들고, 답변으로 eligible을 계산하는 건 항상 이 결정론적
+        코드다 — "아니오" 답변이면 eligible=False로 바뀌어야 한다."""
+        registry = DynamicGateRegistry(
+            {
+                "P1": [
+                    DynamicGate(
+                        policy_id="P1",
+                        gate_id="artist_certification",
+                        question="예술활동증명을 받으셨나요?",
+                        hint="",
+                    )
+                ]
+            }
+        )
+        request = RoadmapRequest(
+            **{**self.request.__dict__, "dynamic_gate_answers": {"P1:artist_certification": False}}
+        )
+        policy = map_youth_policy_row(
+            self._row_with_dynamic_gate(), request, as_of=date(2026, 8, 13),
+            gate_registry=registry,
+        )
+        assert policy is not None
+        self.assertFalse(policy.eligible)
+        self.assertEqual(policy.qualification_status, "ineligible")
+        self.assertNotIn("P1:artist_certification", policy.missing_qualification_fields)
+
+    def test_dynamic_gate_answered_true_keeps_eligible(self):
+        registry = DynamicGateRegistry(
+            {
+                "P1": [
+                    DynamicGate(
+                        policy_id="P1",
+                        gate_id="artist_certification",
+                        question="예술활동증명을 받으셨나요?",
+                        hint="",
+                    )
+                ]
+            }
+        )
+        request = RoadmapRequest(
+            **{**self.request.__dict__, "dynamic_gate_answers": {"P1:artist_certification": True}}
+        )
+        policy = map_youth_policy_row(
+            self._row_with_dynamic_gate(), request, as_of=date(2026, 8, 13),
+            gate_registry=registry,
+        )
+        assert policy is not None
+        self.assertTrue(policy.eligible)
+        self.assertNotIn("P1:artist_certification", policy.missing_qualification_fields)
+
+    def test_dynamic_gate_first_false_answer_stops_asking_remaining_gates(self):
+        """상품 하나에 게이트가 여러 개일 때, 앞 게이트에서 이미 탈락이 확정되면
+        같은 상품의 나머지 게이트는 더 묻지 않는다 — 이미 못 받는 상품인데
+        질문만 계속 쌓이는 걸 막는다(인천 청년월세 지원사업처럼 게이트가
+        6~8개인 실제 사례에서 발견된 문제)."""
+        registry = DynamicGateRegistry(
+            {
+                "P1": [
+                    DynamicGate(
+                        policy_id="P1", gate_id="gate_a", question="조건 A를 만족하나요?", hint=""
+                    ),
+                    DynamicGate(
+                        policy_id="P1", gate_id="gate_b", question="조건 B를 만족하나요?", hint=""
+                    ),
+                ]
+            }
+        )
+        request = RoadmapRequest(
+            **{**self.request.__dict__, "dynamic_gate_answers": {"P1:gate_a": False}}
+        )
+        policy = map_youth_policy_row(
+            self._row_with_dynamic_gate(), request, as_of=date(2026, 8, 13),
+            gate_registry=registry,
+        )
+        assert policy is not None
+        self.assertFalse(policy.eligible)
+        # gate_a에서 이미 탈락 확정 — 아직 답 안 한 gate_b는 물어보지 않는다.
+        self.assertNotIn("P1:gate_b", policy.missing_qualification_fields)
+
+    def test_legacy_field_exclusion_skips_dynamic_gate_question(self):
+        """나이 조건처럼 온보딩만으로 항상 판정되는 하드 조건이 이미 이 상품을
+        탈락시켰으면, 동적 게이트 질문도 더 묻지 않는다."""
+        registry = DynamicGateRegistry(
+            {
+                "P1": [
+                    DynamicGate(
+                        policy_id="P1", gate_id="gate_a", question="조건 A를 만족하나요?", hint=""
+                    ),
+                ]
+            }
+        )
+        request = RoadmapRequest(**{**self.request.__dict__, "age": 50})  # min19~max34 불충족
+        policy = map_youth_policy_row(
+            self._row_with_dynamic_gate(), request, as_of=date(2026, 8, 13),
+            gate_registry=registry,
+        )
+        assert policy is not None
+        self.assertFalse(policy.eligible)
+        self.assertNotIn("P1:gate_a", policy.missing_qualification_fields)
 
     def test_youth_policy_prefers_application_url_over_reference_url(self):
         """실제 데이터: aplyUrlAddr(신청 URL)이 있으면 refUrlAddr(참고 URL, 대개

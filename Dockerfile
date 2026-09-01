@@ -22,6 +22,10 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY data/rag ./data/rag
 COPY data/rag_index ./data/rag_index
+# 상품별 동적 자격조건 게이트 캐시(scripts/extract_policy_gates.py가 생성,
+# status=="verified"인 것만 DynamicGateRegistry가 로드). 갱신했다면 이미지를
+# 다시 빌드해야 한다 — 이 COPY를 빠뜨리면 컨테이너는 항상 빈 디렉터리를 읽는다.
+COPY data/policy_gates ./data/policy_gates
 RUN pip install --no-cache-dir -e .
 
 # FastAPI 어댑터. .env 파일은 절대 복사하지 않는다 — 컨테이너 실행 시점에 주입한다.

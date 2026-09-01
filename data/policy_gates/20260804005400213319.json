@@ -1,0 +1,18 @@
+{
+  "policy_id": "20260804005400213319",
+  "policy_name": "2026. 「은평 청년 버스킹 페스타」 참가자 모집",
+  "source_table": "youth_policy",
+  "content_hash": "sha256:d5374f97929ce0a0a0622840f18f2af07a23e1cba94dff74d8d2a2a3f7af4819",
+  "extracted_at": "2026-09-01T08:21:11.712854+00:00",
+  "extraction_model": "gemini-3.5-flash-lite",
+  "status": "verified",
+  "approved_by": "수빈",
+  "gates": [
+    {
+      "gate_id": "is_youth_group_or_club",
+      "question": "청년 모임 또는 동아리에 해당하시나요?",
+      "hint": "청년 개인뿐만 아니라 청년 모임 및 동아리도 신청할 수 있습니다.",
+      "source_excerpt": "19~39세 청년, 청년 모임 및 동아리"
+    }
+  ]
+}

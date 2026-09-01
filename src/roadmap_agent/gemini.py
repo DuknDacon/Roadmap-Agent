@@ -128,6 +128,90 @@ class GeminiPolicyRuleExtractor:
         return PolicyRule.from_mapping(payload)
 
 
+class GeminiPolicyGateExtractor:
+    """상품 원문에서 4개 하드코딩 필드(financial_income_taxed 등)를 넘어서는
+    예/아니오 자격조건("게이트")을 찾는다. 여기서 만드는 건 질문(question)뿐이고,
+    이 게이트에 대한 사용자 답변으로 eligible을 계산하는 건 항상
+    repositories.py의 결정론적 코드다 — 여기 결과가 곧바로 자격판정에 쓰이지
+    않는다(scripts/extract_policy_gates.py가 만든 파일은 사람이 검수해
+    status를 verified로 올려야만 DynamicGateRegistry에 실제로 로드된다).
+    """
+
+    def __init__(self, *, client: Any, model: str | None = None) -> None:
+        self.client = client
+        self.model = model or os.environ.get("GEMINI_LLM_MODEL", "gemini-3.5-flash-lite")
+
+    def extract(self, *, policy_id: str, policy_name: str, document: str) -> list[dict[str, str]]:
+        from google.genai import types
+
+        if not document.strip():
+            return []
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=json.dumps(
+                {"policy_id": policy_id, "policy_name": policy_name, "document": document},
+                ensure_ascii=False,
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "주어진 정책 원문에서, 나이/지역/소득처럼 이미 계산되는 조건 말고 신청자가 "
+                    "예/아니오로만 답할 수 있는 **추가** 자격조건(자격증, 인증, 신분, 소속 등)만 "
+                    "찾는다. 이미 알려진 4가지 조건(금융소득종합과세 대상 여부, 중소기업 재직 "
+                    "여부, 가구 전체 월소득, 직전년도 연 소득)과 같은 내용이면 제외한다. 문서에 "
+                    "명시되지 않은 조건은 추측하지 않는다. 각 조건은 반드시 원문에서 인용 가능한 "
+                    "근거 문장(source_excerpt)이 있어야 한다.\n"
+                    "다음 두 가지는 반드시 지킨다(둘 다 실제로 잘못 추출된 사례가 있었다):\n"
+                    "1. 극성(polarity) — question은 반드시 \"아니오\"라고 답하면 이 상품에 신청할 "
+                    "수 없다는 뜻이 되도록 만든다. 원문이 배제 조건(\"~인 경우 제외\", \"~하는 자는 "
+                    "지원 불가\")이면 그 상태에 해당하지 않음을 확인하는 질문으로 뒤집어서 물어라 "
+                    "(예: 원문이 \"부모와 함께 거주하는 경우 제외\"면 question은 \"부모와 함께 거주하지 "
+                    "않고 세대를 분리하셨나요?\"로 만들어 \"아니오\"가 곧 배제 대상임을 뜻하게 한다 — "
+                    "\"부모와 함께 거주하시나요?\"처럼 그대로 물으면 안 된다).\n"
+                    "2. 다음 두 종류는 게이트로 뽑지 않는다: (a) 자격 여부 자체가 아니라 가구원 수 "
+                    "산정방식·나이요건 가산처럼 계산 방식을 조정하는 규칙(\"~는 가구원 수 산출에서 "
+                    "제외\", \"~은 나이 요건에 기간을 가산\" 같은 문구), (b) 사업 안의 여러 선택 가능한 "
+                    "세부 트랙(특별선발 분야, 특정 프로그램 등) 중 하나에만 적용되는 조건 — 상품/사업 "
+                    "전체의 신청 자격에 적용되는 조건만 추출한다. 이 두 종류에 해당하면 게이트로 "
+                    "만들지 말고 건너뛴다.\n"
+                    "조건이 없으면 빈 배열을 반환한다. "
+                    "gate_id는 영문 소문자 snake_case 짧은 식별자, question은 신청자에게 그대로 "
+                    "보여줄 한국어 존댓말 질문, hint는 한 문장 설명이다. JSON 객체만 반환하며 "
+                    "키는 gates 하나이고 값은 {gate_id, question, hint, source_excerpt} 객체의 "
+                    "배열이다."
+                ),
+                response_mime_type="application/json",
+                # 게이트가 여러 건이면 JSON이 800토큰 안에 다 안 들어가 응답이
+                # 중간에 잘려 파싱 에러가 나는 걸 실제로 확인했다(2026-09-01,
+                # "Expecting ',' delimiter" — 잘린 JSON). 여유 있게 잡는다.
+                max_output_tokens=2000,
+            ),
+        )
+        text = (response.text or "").strip()
+        # response_mime_type="application/json"을 줘도 가끔 ```json 코드펜스로
+        # 감싸서 오는 경우가 있어 방어적으로 벗겨낸다.
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"{policy_id} 게이트 추출 응답이 올바른 JSON이 아닙니다: {exc}"
+            ) from exc
+        gates = payload.get("gates", [])
+        return [
+            {
+                "gate_id": str(item["gate_id"]),
+                "question": str(item["question"]),
+                "hint": str(item.get("hint") or ""),
+                "source_excerpt": str(item.get("source_excerpt") or ""),
+            }
+            for item in gates
+        ]
+
+
 class GeminiRoadmapExplainer:
     """결정론적 결과를 변경하지 않고 사용자용 설명만 생성한다."""
 
