@@ -10,6 +10,10 @@ from roadmap_agent.conversation import (
     plan_conversation,
     policy_qualification_gaps,
     ConversationPlan,
+    FINANCIAL_INCOME_TAXED_QUESTION,
+    HOUSEHOLD_MONTHLY_INCOME_QUESTION,
+    IS_SME_EMPLOYEE_QUESTION,
+    PREVIOUS_ANNUAL_INCOME_QUESTION,
 )
 from roadmap_agent.domain import Evidence, RiskProfile, RoadmapRequest, RoadmapResult, Scenario
 from roadmap_agent.ports import PolicyBenefit, SavingsProduct
@@ -100,6 +104,7 @@ def test_input_completion_gap_reply_lists_missing_policy_fields():
 def test_input_completion_gap_reply_reports_all_filled_when_nothing_missing():
     request = base_request(
         household_monthly_income=3_000_000, financial_income_taxed=False, is_sme_employee=False,
+        previous_annual_income=40_000_000,
     )
     assert input_gap_reply(request) == "현재 기본 계산에 필요한 입력은 모두 갖춰져 있습니다."
 
@@ -177,6 +182,28 @@ def test_bare_yes_answers_pending_sme_employee_question():
 def test_bare_answer_ignored_when_no_pending_boolean_question():
     updated, changes = apply_policy_answers(base_request(), "응 있어")
     assert updated.financial_income_taxed is None
+    assert changes == []
+
+
+def test_bare_number_ignored_when_two_numeric_questions_pending_at_once():
+    """household_monthly_income 과 previous_annual_income 모두 숫자만 답하면 되는
+    질문이라, 최근 10개 메시지 안에 둘 다 물어본 적이 있으면 "300" 같은 답이 어느
+    쪽인지 알 수 없다 — 추측해서 둘 다 채워버리면 안 되고 무시해야 한다."""
+    context = HOUSEHOLD_MONTHLY_INCOME_QUESTION + " " + PREVIOUS_ANNUAL_INCOME_QUESTION
+    updated, changes = apply_policy_answers(base_request(), "300", context=context)
+    assert updated.household_monthly_income is None
+    assert updated.previous_annual_income is None
+    assert changes == []
+
+
+def test_bare_answer_ignored_when_two_boolean_questions_pending_at_once():
+    """financial_income_taxed 와 is_sme_employee 모두 예/아니오로 답하면 되는
+    질문이라, 최근 10개 메시지 안에 둘 다 물어본 적이 있으면 "응" 같은 짧은 답이
+    어느 쪽인지 알 수 없다 — 추측해서 둘 다 채워버리면 안 되고 무시해야 한다."""
+    context = FINANCIAL_INCOME_TAXED_QUESTION + " " + IS_SME_EMPLOYEE_QUESTION
+    updated, changes = apply_policy_answers(base_request(), "응", context=context)
+    assert updated.financial_income_taxed is None
+    assert updated.is_sme_employee is None
     assert changes == []
 
 

@@ -298,20 +298,68 @@ class RepositoriesTest(unittest.TestCase):
         self.assertFalse(policy.eligible)
         self.assertEqual(policy.qualification_status, "ineligible")
 
-    def test_welfare_income_condition_is_not_assumed_eligible(self):
+    def test_welfare_median_income_condition_asks_instead_of_assuming_ineligible(self):
+        """이전엔 "중위소득" 문구만 있으면 실제 소득 비교 없이 무조건 eligible=False로
+        고정돼, welfare_service 레코드가 어떤 프로필로도 후보가 될 수 없었다(죽은
+        데이터). 이제는 youth_policy와 같은 방식으로 실제 값이 없으면 확인을
+        요청(needs_input)할 뿐, 자격을 임의로 단정하지 않는다."""
+        request = RoadmapRequest(**{**self.request.__dict__, "age": 28})
         policy = map_welfare_policy_row(
             {
                 "servId": "W1", "servNm": "청년통장",
                 "tgtrDtlCn": "만 19세~34세, 기준 중위소득 100% 이하",
                 "alwServCn": "월 10만원을 3년간 1:1 매칭 지원", "crtrYr": "2026",
             },
-            self.request,
+            request,
             as_of=date(2026, 8, 13),
         )
         self.assertIsNotNone(policy)
         assert policy is not None
+        self.assertTrue(policy.eligible)
+        self.assertEqual(policy.qualification_status, "needs_input")
+        self.assertIn("household_monthly_income", policy.missing_qualification_fields)
+
+    def test_welfare_median_income_condition_uses_real_comparison_once_income_known(self):
+        request = RoadmapRequest(
+            **{
+                **self.request.__dict__,
+                "age": 28,
+                "household_size": 1,
+                "household_monthly_income": 5_200_000,
+            }
+        )
+        policy = map_welfare_policy_row(
+            {
+                "servId": "W1", "servNm": "청년통장",
+                "tgtrDtlCn": "만 19세~34세, 기준 중위소득 100% 이하",
+                "alwServCn": "월 10만원을 3년간 1:1 매칭 지원", "crtrYr": "2026",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+        assert policy is not None
         self.assertFalse(policy.eligible)
-        self.assertIn("중위소득", policy.reason)
+        self.assertEqual(policy.qualification_status, "ineligible")
+        self.assertIn("초과", policy.reason)
+
+    def test_welfare_special_target_group_is_flagged_for_verification_not_excluded(self):
+        """북한이탈주민/농업인/어업인/무주택 여부를 물어볼 프로필 필드가 아직 없어,
+        예전처럼 무조건 배제하지 않고 "확인 필요" 상태로만 남겨 후보에서 사라지지
+        않게 한다(영구 배제 방지)."""
+        request = RoadmapRequest(**{**self.request.__dict__, "age": 28})
+        policy = map_welfare_policy_row(
+            {
+                "servId": "W2", "servNm": "북한이탈주민 자산형성지원제도",
+                "tgtrDtlCn": "만 19세~34세, 북향민",
+                "alwServCn": "월 10만원을 3년간 1:1 매칭 지원", "crtrYr": "2026",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+        assert policy is not None
+        self.assertTrue(policy.eligible)
+        self.assertEqual(policy.qualification_status, "needs_verification")
+        self.assertIn("특수조건", policy.reason)
 
 
 if __name__ == "__main__":

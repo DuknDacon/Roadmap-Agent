@@ -165,10 +165,10 @@ def map_youth_policy_row(
             reasons.append(f"연령조건 {min_age}~{max_age}세 충족")
 
     max_income = _number(row.get("earnMaxAmt")) or 0
-    taxable_income = request.previous_annual_income or request.annual_income
+    taxable_income = request.previous_annual_income
     if max_income:
         if taxable_income is None:
-            eligible = False
+            missing_fields.append("previous_annual_income")
             reasons.append("직전년도 과세소득 확인 필요")
         elif taxable_income > max_income * 10_000:
             eligible = False
@@ -310,6 +310,7 @@ def map_welfare_policy_row(
 
     eligible = True
     reasons: list[str] = []
+    missing_fields: list[str] = []
     age_match = AGE_RANGE_RE.search(target)
     if age_match:
         low, high = map(int, age_match.groups())
@@ -322,17 +323,52 @@ def map_welfare_policy_row(
         else:
             reasons.append(f"연령조건 {low}~{high}세 충족")
     if "중위소득" in target:
-        eligible = False
-        if request.current_annual_income is None:
-            reasons.append("현재 근로소득과 가구소득 인정액·중위소득 비율 확인 필요")
+        # youth_policy와 동일한 방식(median_income_limit)으로 실제 소득 대비 비율을 계산한다.
+        # 예전엔 "중위소득" 문구만 있으면 실제 비교 없이 무조건 eligible=False로 고정해,
+        # 이 조건이 있는 welfare_service 레코드가 어떤 프로필로도 후보가 될 수 없었다.
+        household_income = effective_household_monthly_income(request)
+        if household_income is None:
+            missing_fields.append("household_monthly_income")
+            reasons.append("가구 중위소득 판정을 위한 월소득 입력 필요")
+        elif request.household_size is None:
+            missing_fields.append("household_size")
+            reasons.append("가구 중위소득 판정을 위한 가구원 수 입력 필요")
         else:
-            reasons.append(
-                f"현재 예상 근로소득 연 {request.current_annual_income:,}원 기준으로 "
-                "가구소득 인정액·중위소득 비율 추가 확인 필요"
-            )
+            income_limit = median_income_limit(target, as_of.year, request.household_size)
+            if income_limit is None:
+                reasons.append("가구 중위소득 기준연도 또는 비율 확인 필요")
+            else:
+                ratio, limit = income_limit
+                if household_income > limit:
+                    eligible = False
+                    reasons.append(
+                        f"입력 월소득이 {as_of.year}년 {request.household_size}인 가구 "
+                        f"기준 중위소득 {ratio:.0%} 한도 {limit:,}원을 초과"
+                    )
+                else:
+                    reasons.append(
+                        f"입력 월소득 기준 {as_of.year}년 {request.household_size}인 가구 "
+                        f"기준 중위소득 {ratio:.0%} 한도 {limit:,}원 이하"
+                    )
+                    reasons.append("실제 심사는 운영기관의 소득인정 기준 재확인 필요")
     if any(term in target for term in ("북향민", "농업인", "어업인", "무주택")):
-        eligible = False
-        reasons.append("대상자 특수조건 확인 필요")
+        # 이 대상군(북한이탈주민/농업인/어업인/무주택자) 여부를 물어볼 전용 프로필 필드가
+        # 아직 없다 — 그렇다고 예전처럼 무조건 배제(eligible=False)하면 해당 신분에 실제로
+        # 해당하는 사용자에게도 영원히 후보가 안 뜬다. 중위소득 조건과 같은 방식으로
+        # "확인 필요" 상태로만 남기고 최종 판단은 운영기관에 위임한다(영구 배제하지 않음).
+        reasons.append("대상자 특수조건(운영기관) 확인 필요")
+
+    missing_fields = list(dict.fromkeys(missing_fields))
+    needs_verification = any("확인 필요" in reason for reason in reasons)
+    qualification_status = (
+        "ineligible"
+        if not eligible
+        else "needs_input"
+        if missing_fields
+        else "needs_verification"
+        if needs_verification
+        else "confirmed"
+    )
 
     return PolicyBenefit(
         policy_id=str(row.get("servId") or ""),
@@ -347,7 +383,8 @@ def map_welfare_policy_row(
         application_open=None,
         support_rate=_support_rate(benefit),
         preferential_support_rate=_preferential_support_rate(benefit),
-        qualification_status="confirmed" if eligible else "needs_verification",
+        qualification_status=qualification_status,
+        missing_qualification_fields=tuple(missing_fields),
     )
 
 

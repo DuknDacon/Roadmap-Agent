@@ -140,11 +140,15 @@ def _matches_current_scenario(result: RoadmapResult | None, message: str) -> boo
 # 로드맵 생성 전 사전 체크(backend/app/service.py)에서도 그대로 재사용하는
 # 문구 — 여러 곳에 복붙하지 않도록 여기 하나만 둔다.
 FINANCIAL_INCOME_TAXED_QUESTION = "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+IS_SME_EMPLOYEE_QUESTION = "현재 중소기업에 재직 중인가요?"
+HOUSEHOLD_MONTHLY_INCOME_QUESTION = "가구 전체의 월소득은 얼마인가요?"
+PREVIOUS_ANNUAL_INCOME_QUESTION = "직전년도(전년도) 실제 연 소득은 세전 기준으로 얼마였나요?"
 
 _PENDING_POLICY_QUESTIONS = (
-    "가구 전체의 월소득은 얼마인가요?",
+    HOUSEHOLD_MONTHLY_INCOME_QUESTION,
     FINANCIAL_INCOME_TAXED_QUESTION,
-    "현재 중소기업에 재직 중인가요?",
+    IS_SME_EMPLOYEE_QUESTION,
+    PREVIOUS_ANNUAL_INCOME_QUESTION,
 )
 
 
@@ -245,7 +249,7 @@ def policy_qualification_gaps(
     awaiting = _awaiting_policy_answer(context)
     gaps: list[str] = []
     if effective_household_monthly_income(request) is None:
-        gaps.append("가구 전체의 월소득은 얼마인가요?")
+        gaps.append(HOUSEHOLD_MONTHLY_INCOME_QUESTION)
     if request.financial_income_taxed is None and (
         awaiting or re.search(r"(우대형|금융소득|자격)", message)
     ):
@@ -253,7 +257,11 @@ def policy_qualification_gaps(
     if request.is_sme_employee is None and (
         awaiting or re.search(r"(우대형|중소기업)", message)
     ):
-        gaps.append("현재 중소기업에 재직 중인가요?")
+        gaps.append(IS_SME_EMPLOYEE_QUESTION)
+    if request.previous_annual_income is None and (
+        awaiting or re.search(r"(직전년도|전년도|작년)\s*소득", message)
+    ):
+        gaps.append(PREVIOUS_ANNUAL_INCOME_QUESTION)
     return gaps
 
 
@@ -272,8 +280,15 @@ def apply_policy_answers(
         amount = round(value * multiplier)
         changes["household_monthly_income"] = amount
         descriptions.append(f"가구 월소득 {amount:,}원")
-    elif request.household_monthly_income is None and _awaiting_policy_answer(context):
+    elif (
+        request.household_monthly_income is None
+        and HOUSEHOLD_MONTHLY_INCOME_QUESTION in context
+        and PREVIOUS_ANNUAL_INCOME_QUESTION not in context
+    ):
         # 직전에 가구 월소득을 물었다면, 단위 없이 숫자만 온 답도 만원 단위로 받는다.
+        # 직전년도 소득도 같은 방식(숫자만 답)으로 되묻으므로, 두 질문 문구가
+        # context 에 동시에 있으면(최근 10개 메시지 중에 둘 다 물어본 적이 있으면)
+        # 어느 쪽 답인지 알 수 없다 — 이럴 땐 추측해서 잘못 채우지 말고 무시한다.
         bare_number = re.fullmatch(r"[\d,]+(?:\.\d+)?", message.strip())
         if bare_number:
             amount = round(float(bare_number.group().replace(",", "")) * 10_000)
@@ -287,8 +302,14 @@ def apply_policy_answers(
     elif re.search(r"금융소득종합과세.{0,12}(?:있|맞|해당)", message):
         changes["financial_income_taxed"] = True
         descriptions.append("금융소득종합과세 이력 있음")
-    elif request.financial_income_taxed is None and "금융소득종합과세" in context:
+    elif (
+        request.financial_income_taxed is None
+        and "금융소득종합과세" in context
+        and "중소기업" not in context
+    ):
         # 직전에 이 질문을 물었다면 "응 있어"/"아니요" 같은 짧은 구어체 단답도 인식한다.
+        # 중소기업 재직 여부도 같은 방식(예/아니오)으로 되묻으므로, 두 질문이 모두
+        # context 에 있으면 어느 쪽 답인지 알 수 없어 추측하지 않는다.
         stripped = message.strip()
         if _NO_ANSWER.search(stripped):
             changes["financial_income_taxed"] = False
@@ -306,7 +327,12 @@ def apply_policy_answers(
     elif re.search(r"중소기업.{0,10}(?:재직|다니)", message):
         changes["is_sme_employee"] = True
         descriptions.append("중소기업 재직")
-    elif request.is_sme_employee is None and "중소기업" in context:
+    elif (
+        request.is_sme_employee is None
+        and "중소기업" in context
+        and "금융소득종합과세" not in context
+    ):
+        # 같은 이유로 두 질문이 동시에 context 에 있으면 무시한다.
         stripped = message.strip()
         if _NO_ANSWER.search(stripped):
             changes["is_sme_employee"] = False
@@ -314,6 +340,27 @@ def apply_policy_answers(
         elif _YES_ANSWER.search(stripped):
             changes["is_sme_employee"] = True
             descriptions.append("중소기업 재직")
+    prev_income = re.search(
+        r"(?:직전년도|전년도|작년)\s*(?:연)?\s*소득\D{0,12}([\d,.]+)\s*(천만|만)?\s*원",
+        message,
+    )
+    if prev_income:
+        value = float(prev_income.group(1).replace(",", ""))
+        multiplier = {None: 1, "만": 10_000, "천만": 10_000_000}[prev_income.group(2)]
+        amount = round(value * multiplier)
+        changes["previous_annual_income"] = amount
+        descriptions.append(f"직전년도 연 소득 {amount:,}원")
+    elif (
+        request.previous_annual_income is None
+        and PREVIOUS_ANNUAL_INCOME_QUESTION in context
+        and HOUSEHOLD_MONTHLY_INCOME_QUESTION not in context
+    ):
+        # 가구 월소득과 같은 이유로 두 질문이 동시에 context 에 있으면 무시한다.
+        bare_number = re.fullmatch(r"[\d,]+(?:\.\d+)?", message.strip())
+        if bare_number:
+            amount = round(float(bare_number.group().replace(",", "")) * 10_000)
+            changes["previous_annual_income"] = amount
+            descriptions.append(f"직전년도 연 소득 {amount:,}원")
     if not changes:
         return request, []
     updated = replace(request, **changes)
@@ -367,6 +414,8 @@ def input_gap_reply(request: RoadmapRequest) -> str:
         gaps.append("금융소득종합과세 이력")
     if request.is_sme_employee is None:
         gaps.append("중소기업 재직 여부")
+    if request.previous_annual_income is None:
+        gaps.append("직전년도 연 소득")
     if not gaps:
         return "현재 기본 계산에 필요한 입력은 모두 갖춰져 있습니다."
     return "정책 자격을 더 정확히 확인하려면 " + ", ".join(gaps) + "가 필요합니다."

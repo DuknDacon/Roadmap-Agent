@@ -41,6 +41,88 @@ class FinancialIncomeTaxedGapPolicies:
         ]
 
 
+class MultiFieldGapPolicies:
+    """한 후보가 financial_income_taxed 와 is_sme_employee 를 동시에 요구하는
+    경우(우대형+금융소득 조건이 모두 있는 상품)를 흉내 — 사전 체크가 여러
+    필드를 한 번에 물어보는지 확인하기 위함."""
+
+    def find_candidates(self, request):
+        missing = []
+        if request.financial_income_taxed is None:
+            missing.append("financial_income_taxed")
+        if request.is_sme_employee is None:
+            missing.append("is_sme_employee")
+        return [
+            PolicyBenefit(
+                policy_id="P2",
+                name="복합조건 우대적금",
+                eligible=True,
+                monthly_limit=500_000,
+                estimated_support=1_000_000,
+                maturity_months=24,
+                source_url="",
+                effective_date="2026-08-31",
+                reason="테스트용",
+                missing_qualification_fields=tuple(missing),
+            )
+        ]
+
+
+class HouseholdIncomeGapPolicies:
+    """household_monthly_income이 없으면 이 필드가 걸리는 정책 후보 1건을
+    반환한다(2인 이상 가구의 중위소득 조건 상품을 흉내) — 사전 체크가
+    financial_income_taxed 전용이 아니라 일반화됐는지 확인하기 위함."""
+
+    def find_candidates(self, request):
+        missing = (
+            ("household_monthly_income",)
+            if request.household_monthly_income is None
+            else ()
+        )
+        return [
+            PolicyBenefit(
+                policy_id="P3",
+                name="희망저축계좌",
+                eligible=True,
+                monthly_limit=300_000,
+                estimated_support=500_000,
+                maturity_months=36,
+                source_url="",
+                effective_date="2026-08-31",
+                reason="테스트용",
+                missing_qualification_fields=missing,
+            )
+        ]
+
+
+class PreviousIncomeGapPolicies:
+    """previous_annual_income이 없으면 이 필드가 걸리는 정책 후보 1건을
+    반환한다(소득상한이 있는 상품이 온보딩 값이 아니라 직전년도 실제 소득을
+    요구하는 경우를 흉내) — 온보딩 폼에서 이 필드를 제거한 뒤에도 사전
+    체크가 실제로 물어보는지 확인하기 위함."""
+
+    def find_candidates(self, request):
+        missing = (
+            ("previous_annual_income",)
+            if request.previous_annual_income is None
+            else ()
+        )
+        return [
+            PolicyBenefit(
+                policy_id="P4",
+                name="소득상한 있는 정책상품",
+                eligible=True,
+                monthly_limit=300_000,
+                estimated_support=500_000,
+                maturity_months=36,
+                source_url="",
+                effective_date="2026-08-31",
+                reason="테스트용",
+                missing_qualification_fields=missing,
+            )
+        ]
+
+
 class EmptySavings:
     def find_candidates(self, request):
         return []
@@ -188,9 +270,118 @@ def test_second_call_with_financial_income_taxed_answered_builds_real_roadmap():
     assert response.recommended is not None
 
 
+def test_household_monthly_income_pre_check_asks_then_builds_roadmap_once_answered():
+    """household_monthly_income 도 같은 사전 체크 메커니즘으로 물어봐야 한다 —
+    financial_income_taxed 전용이 아니라 일반화됐는지 확인."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=HouseholdIncomeGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        first = roadmap(RoadmapCreateRequest(**PAYLOAD, threadId=uuid4()))
+        assert first.recommended is None
+        assert first.missing_fields == ["household_monthly_income"]
+        assert first.chat_reply == "가구 전체의 월소득은 얼마인가요?"
+
+        payload = {**PAYLOAD, "householdMonthlyIncome": 3_500_000}
+        second = roadmap(RoadmapCreateRequest(**payload, threadId=uuid4()))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert second.conversation_status != "needs_input"
+    assert second.recommended is not None
+
+
+def test_previous_annual_income_pre_check_asks_then_builds_roadmap_once_answered():
+    """온보딩 폼에서 직전년도 연 소득 항목을 뺀 뒤에도, 그 값을 실제로 요구하는
+    상품이 매칭되면 로드맵 없이 먼저 물어봐야 한다 — 현재 연 소득과 같다고
+    조용히 가정해버리면 소득상한 자격 판정이 틀릴 수 있다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=PreviousIncomeGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        payload = {**PAYLOAD, "previousAnnualIncome": None}
+        first = roadmap(RoadmapCreateRequest(**payload, threadId=uuid4()))
+        assert first.recommended is None
+        assert first.missing_fields == ["previous_annual_income"]
+        assert "직전년도" in first.chat_reply
+
+        payload = {**PAYLOAD, "previousAnnualIncome": 38_000_000}
+        second = roadmap(RoadmapCreateRequest(**payload, threadId=uuid4()))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert second.conversation_status != "needs_input"
+    assert second.recommended is not None
+
+
 def test_pre_check_does_not_trigger_when_no_candidate_needs_the_field():
     """정책 후보가 아예 없거나 이 필드가 필요 없으면(기존 테스트 전부 이 경우)
     사전 체크는 걸리지 않고 기존처럼 즉시 로드맵이 나온다 — 회귀 확인."""
     response = roadmap(RoadmapCreateRequest(**PAYLOAD, threadId=uuid4()))
     assert response.recommended is not None
     assert response.conversation_status is None
+
+
+def test_first_call_asks_all_missing_fields_at_once_when_a_candidate_needs_both():
+    """한 후보가 여러 필드를 동시에 요구하면 한 번에 모두 물어봐야 한다 —
+    필드 하나씩 따로 왕복하지 않는지 확인(일반화된 사전 체크의 핵심)."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=MultiFieldGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        payload = {**PAYLOAD, "isSmeEmployee": None}
+        response = roadmap(RoadmapCreateRequest(**payload, threadId=uuid4()))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.recommended is None
+    assert set(response.missing_fields) == {"financial_income_taxed", "is_sme_employee"}
+    assert "금융소득종합과세" in response.chat_reply
+    assert "중소기업" in response.chat_reply
+
+
+def test_second_call_answering_only_one_of_two_fields_still_asks_for_the_remaining_one():
+    """두 필드 중 하나만 답하면, 그 필드는 더 이상 안 걸리고 나머지 하나만
+    걸려야 한다 — 답변이 실제로 반영되는지 확인."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=MultiFieldGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        payload = {**PAYLOAD, "isSmeEmployee": None, "financialIncomeTaxed": False}
+        response = roadmap(RoadmapCreateRequest(**payload, threadId=uuid4()))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.recommended is None
+    assert response.missing_fields == ["is_sme_employee"]
+
+
+def test_third_call_answering_both_fields_builds_real_roadmap():
+    """두 필드가 모두 채워지면 사전 체크를 완전히 건너뛰고 실제 로드맵이
+    나와야 한다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=MultiFieldGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        payload = {**PAYLOAD, "financialIncomeTaxed": False}
+        response = roadmap(RoadmapCreateRequest(**payload, threadId=uuid4()))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.conversation_status != "needs_input"
+    assert response.recommended is not None

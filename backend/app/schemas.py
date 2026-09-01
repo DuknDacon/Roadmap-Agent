@@ -13,7 +13,9 @@ class ApiModel(BaseModel):
 
 class RoadmapCreateRequest(ApiModel):
     birth_date: date = Field(alias="birthDate")
-    previous_annual_income: int = Field(alias="previousAnnualIncome", ge=0)
+    previous_annual_income: int | None = Field(
+        default=None, alias="previousAnnualIncome", ge=0
+    )
     current_annual_income: int = Field(alias="currentAnnualIncome", ge=0)
     region: str = Field(min_length=1)
     region_province_code: str = Field(alias="regionProvinceCode", min_length=2)
@@ -24,6 +26,9 @@ class RoadmapCreateRequest(ApiModel):
     employment_type: str | None = Field(default=None, alias="employmentType")
     is_sme_employee: bool | None = Field(default=None, alias="isSmeEmployee")
     financial_income_taxed: bool | None = Field(default=None, alias="financialIncomeTaxed")
+    household_monthly_income: int | None = Field(
+        default=None, alias="householdMonthlyIncome", ge=0
+    )
     monthly_take_home: int | None = Field(default=None, alias="monthlyTakeHome", gt=0)
     monthly_budget: int = Field(alias="monthlyBudget", gt=0)
     target_date: date = Field(alias="targetDate")

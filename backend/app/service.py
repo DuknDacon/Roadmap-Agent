@@ -5,7 +5,12 @@ import calendar
 from datetime import date, datetime, timezone
 from hashlib import sha1
 
-from roadmap_agent.conversation import FINANCIAL_INCOME_TAXED_QUESTION
+from roadmap_agent.conversation import (
+    FINANCIAL_INCOME_TAXED_QUESTION,
+    HOUSEHOLD_MONTHLY_INCOME_QUESTION,
+    IS_SME_EMPLOYEE_QUESTION,
+    PREVIOUS_ANNUAL_INCOME_QUESTION,
+)
 from roadmap_agent.domain import RiskProfile, RoadmapRequest, Scenario
 from roadmap_agent.orchestrator import build_conversation_graph, run_roadmap
 
@@ -66,6 +71,35 @@ PRODUCT_TYPE = {
     "investment": "분산투자형",
     "balanced": "균형 배분형",
 }
+
+
+# 로드맵 생성 전 사전 체크 대상 필드 → 질문 문구. 상품마다 필요한 자격조건이
+# 달라, DB 매칭 후보(PolicyBenefit.missing_qualification_fields)가 실제로
+# 요구하는 필드만 여기서 걸러 로드맵 없이 먼저 물어본다. 새 상품이 다른
+# 필드를 요구하게 되면 repositories.py 가 missing_qualification_fields 에
+# 그 필드명을 채우고, 여기 매핑에 질문 문구 한 줄만 추가하면 된다.
+_PRELAUNCH_FIELD_QUESTIONS: dict[str, str] = {
+    "financial_income_taxed": FINANCIAL_INCOME_TAXED_QUESTION,
+    "is_sme_employee": IS_SME_EMPLOYEE_QUESTION,
+    "household_monthly_income": HOUSEHOLD_MONTHLY_INCOME_QUESTION,
+    "previous_annual_income": PREVIOUS_ANNUAL_INCOME_QUESTION,
+}
+
+
+def _prelaunch_missing_fields(request: RoadmapRequest, runtime) -> list[str]:
+    """DB 매칭 후보 전체가 요구하는, 사전 체크 대상 필드의 합집합.
+
+    순수 DB 조회(policy_repository.find_candidates)만 쓰므로 LLM 호출이 없고
+    수십 ms 안에 끝난다. 반환된 필드가 다음 호출에서 채워지면 그 필드는 더
+    이상 어떤 후보의 missing_qualification_fields 에도 나타나지 않는다.
+    """
+    if runtime.policy_repository is None:
+        return []
+    candidates = runtime.policy_repository.find_candidates(request)
+    present = {
+        field for candidate in candidates for field in candidate.missing_qualification_fields
+    }
+    return [name for name in _PRELAUNCH_FIELD_QUESTIONS if name in present]
 
 
 def _age(birth_date: date, as_of: date) -> int:
@@ -144,6 +178,7 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         employment_type=payload.employment_type,
         is_sme_employee=payload.is_sme_employee,
         financial_income_taxed=payload.financial_income_taxed,
+        household_monthly_income=payload.household_monthly_income,
         household_size=payload.household_size,
         is_married=payload.marital_status == "married",
         question=payload.question,
@@ -151,23 +186,19 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
     runtime = get_runtime()
 
     # 로드맵을 계산하기 전에, DB 매칭 후보 중 사용자 입력만으로는 판정 못 하는
-    # 필드(financial_income_taxed)가 걸리는 게 있으면 로드맵 없이 먼저 물어본다.
-    # 순수 DB 조회라 LLM 호출이 없고, 답변되면(다음 호출부터 필드가 채워짐)
-    # 이 체크는 더 이상 걸리지 않아 이후 흐름은 지금과 동일하다.
-    if request.financial_income_taxed is None and runtime.policy_repository is not None:
-        candidates = runtime.policy_repository.find_candidates(request)
-        if any(
-            "financial_income_taxed" in candidate.missing_qualification_fields
-            for candidate in candidates
-        ):
-            return RoadmapResponse(
-                summary="맞춤 로드맵을 만들기 전에 확인이 필요합니다.",
-                chatReply=FINANCIAL_INCOME_TAXED_QUESTION,
-                notice="추가 정보를 답변하시면 그 즉시 로드맵을 만들어 드립니다.",
-                generatedAt=datetime.now(timezone.utc),
-                conversationStatus="needs_input",
-                missingFields=["financial_income_taxed"],
-            )
+    # 필드가 걸리는 게 있으면 로드맵 없이 먼저 물어본다(한 번에 여러 개일 수
+    # 있음 — ProfileAskForm 은 fields 배열을 그대로 받아 한 카드에 렌더한다).
+    missing_fields = _prelaunch_missing_fields(request, runtime)
+    if missing_fields:
+        questions = [_PRELAUNCH_FIELD_QUESTIONS[name] for name in missing_fields]
+        return RoadmapResponse(
+            summary="맞춤 로드맵을 만들기 전에 확인이 필요합니다.",
+            chatReply=" ".join(questions),
+            notice="추가 정보를 답변하시면 그 즉시 로드맵을 만들어 드립니다.",
+            generatedAt=datetime.now(timezone.utc),
+            conversationStatus="needs_input",
+            missingFields=missing_fields,
+        )
 
     result = run_roadmap(
         request,
@@ -201,13 +232,20 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
                 else None
             ),
         )
-    income_change = abs(payload.current_annual_income - payload.previous_annual_income)
-    income_change_rate = income_change / max(payload.previous_annual_income, 1)
-    income_note = (
-        "직전년도와 현재 예상 연소득 차이가 커서 상품별 기준연도 확인이 필요합니다."
-        if income_change_rate >= 0.2
-        else "직전년도 과세소득과 현재 예상소득을 각각 자격과 납입여력에 반영했습니다."
-    )
+    if payload.previous_annual_income is None:
+        # 이 사용자에게 매칭된 정책 후보 중 직전년도 소득이 필요한 게 없어 사전
+        # 체크(위)를 통과한 경우 — 안내 문구만 그 사실을 반영하고, 어떤 자격
+        # 판정에도 현재 소득을 직전년도 소득 대신 쓰지 않는다(request.previous_annual_income
+        # 은 None으로 그대로 유지돼 repositories.py가 정확히 "미확인"으로 취급함).
+        income_note = "이번 추천에는 직전년도 소득 확인이 필요한 상품이 없어 현재 예상소득만 반영했습니다."
+    else:
+        income_change = abs(payload.current_annual_income - payload.previous_annual_income)
+        income_change_rate = income_change / max(payload.previous_annual_income, 1)
+        income_note = (
+            "직전년도와 현재 예상 연소득 차이가 커서 상품별 기준연도 확인이 필요합니다."
+            if income_change_rate >= 0.2
+            else "직전년도 과세소득과 현재 예상소득을 각각 자격과 납입여력에 반영했습니다."
+        )
     alternative = result.alternatives[0] if result.alternatives else result.recommended
     alternatives_list = (
         [_scenario(item, "대안") for item in result.alternatives]
