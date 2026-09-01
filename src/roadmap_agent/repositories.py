@@ -80,6 +80,27 @@ def _preferential_support_rate(text: str) -> float | None:
     return float(percent.group(1)) / 100 if percent else None
 
 
+_STIPEND_KEYWORDS = (
+    "참여수당",
+    "구직촉진수당",
+    "취업활동비용",
+    "근로수당",
+    "실습수당",
+    "활동수당",
+    "훈련비",
+)
+
+
+def _is_stipend_program(text: str) -> bool:
+    # "월 234만원 참여수당 지급" 같은 취업·훈련 참여수당형 정책은 저축액에
+    # 비례해 정부가 보태주는 적립형 상품이 아니라, 일하거나 훈련에 참여한
+    # 대가로 받는 급여성 지원이다. estimated_support가 이런 텍스트에서
+    # "최대 234만원" 패턴으로 잘못 추출되면 로드맵 시나리오가 이를
+    # "정부기여금"인 것처럼 안내하게 되므로, 저축형 정책상품 후보에서
+    # 제외할 수 있도록 별도로 표시해둔다.
+    return any(keyword in text for keyword in _STIPEND_KEYWORDS)
+
+
 def _date_value(value: Any) -> str:
     text = str(value or "").strip()
     if len(text) >= 8 and text[:8].isdigit():
@@ -349,6 +370,7 @@ def map_youth_policy_row(
         qualification_status=qualification_status,
         benefit_tier=benefit_tier,
         missing_qualification_fields=tuple(missing_fields),
+        is_stipend_program=_is_stipend_program(text),
     )
 
 
@@ -455,6 +477,7 @@ def map_welfare_policy_row(
         preferential_support_rate=_preferential_support_rate(benefit),
         qualification_status=qualification_status,
         missing_qualification_fields=tuple(missing_fields),
+        is_stipend_program=_is_stipend_program(benefit),
     )
 
 

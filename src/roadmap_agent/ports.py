@@ -46,6 +46,7 @@ class PolicyBenefit:
     qualification_status: str = "confirmed"
     benefit_tier: str = "standard"
     missing_qualification_fields: tuple[str, ...] = ()
+    is_stipend_program: bool = False
 
 
 class SavingsProductRepository(Protocol):

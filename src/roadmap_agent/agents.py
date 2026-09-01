@@ -226,7 +226,12 @@ def policy_candidate_scenarios(
     candidates = [
         item
         for item in repository.find_candidates(request)
-        if item.eligible and item.maturity_months <= request.horizon_months
+        if item.eligible
+        and item.maturity_months <= request.horizon_months
+        # 참여수당형 정책(예: "월 234만원 참여수당 지급")은 저축액에 비례해
+        # 정부가 보태주는 적립형 상품이 아니라 근로·훈련 참여의 대가로 받는
+        # 급여성 지원이라, 시드머니 저축 시나리오로 안내하면 오해를 준다.
+        and not item.is_stipend_program
     ]
     if not candidates:
         return []

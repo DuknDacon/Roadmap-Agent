@@ -496,6 +496,48 @@ class RepositoriesTest(unittest.TestCase):
         self.assertEqual(policy.qualification_status, "needs_verification")
         self.assertIn("특수조건", policy.reason)
 
+    def test_stipend_program_is_flagged_not_treated_as_matching_savings(self):
+        """"사회연대경제 청년일경험"처럼 "월 234만원 참여수당 지급" 같은 근로
+        참여수당형 정책은 저축액에 비례해 정부가 보태주는 적립형 상품이 아니다.
+        estimated_support가 "최대 234만원" 패턴으로 잘못 추출돼 정부기여금인
+        것처럼 안내되는 걸 막기 위해 is_stipend_program=True로 표시돼야 한다."""
+        request = RoadmapRequest(**{**self.request.__dict__, "age": 28})
+        policy = map_youth_policy_row(
+            {
+                "plcyNo": "P9", "plcyNm": "사회연대경제 청년일경험",
+                "plcyExplnCn": "사회연대경제 조직에서 5개월간 일경험",
+                "plcySprtCn": "월 234만원 참여수당 지급\n - 월 최대 234만원 지급(세전, 주 40시간 기준)",
+                "addAplyQlfcCndCn": "",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+        assert policy is not None
+        self.assertTrue(policy.is_stipend_program)
+
+    def test_stipend_program_excluded_from_savings_scenarios(self):
+        """policy_candidate_scenarios(저축 로드맵 시나리오 빌더)는 참여수당형
+        정책을 후보에서 제외해야 한다 — eligible=True인데도 제외되는지 확인한다."""
+        request = RoadmapRequest(**{**self.request.__dict__, "monthly_budget": 500_000})
+        stipend_policy = map_youth_policy_row(
+            {
+                "plcyNo": "P9", "plcyNm": "사회연대경제 청년일경험",
+                "plcyExplnCn": "사회연대경제 조직에서 5개월간 일경험",
+                "plcySprtCn": "월 234만원 참여수당 지급\n - 월 최대 234만원 지급(세전, 주 40시간 기준)",
+                "addAplyQlfcCndCn": "",
+            },
+            request,
+            as_of=date(2026, 8, 13),
+        )
+        assert stipend_policy is not None
+        self.assertTrue(stipend_policy.eligible)
+        self.assertTrue(stipend_policy.is_stipend_program)
+
+        scenarios = policy_candidate_scenarios(
+            request, _FakeRetriever(), _FakePolicyRepository([stipend_policy])
+        )
+        self.assertEqual(scenarios, [])
+
 
 if __name__ == "__main__":
     unittest.main()
