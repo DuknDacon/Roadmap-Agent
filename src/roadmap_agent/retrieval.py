@@ -15,6 +15,35 @@ from .rag_chunking import chunk_markdown
 TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]{2,}")
 STOP_TOKENS = {"어떻게", "관련", "대한", "경우", "현재", "질문", "알려줘"}
 
+# 문서 간 답변이 충돌할 때 우선순위를 정하는 기준. 값이 높을수록 우선한다.
+# 법령 원문 > 시행령 > 국세청 등 공식 안내 > 팀이 통합·요약한 안내 > 일반 교육자료.
+SOURCE_TYPE_PRIORITY = {
+    "law": 5,
+    "enforcement_decree": 4,
+    "tax_guide": 3,
+    "official_guide_synthesis": 2,
+    "finance_education": 1,
+}
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def source_priority(source_type: str) -> int:
+    return SOURCE_TYPE_PRIORITY.get(source_type, 0)
+
+
+def is_effective_now(effective_date: str, *, today: str | None = None) -> bool:
+    """effective_date가 아직 시행되지 않은 미래 날짜면 False, 그 외(빈 값·해석 불가·현재/과거)는 True.
+
+    문서 메타데이터의 effective_date는 형식이 자유로운 필드라 값이 없거나
+    ISO 날짜가 아닌 경우도 있다. 그런 값을 근거 없이 걸러내면 정상 문서가
+    사라지므로, 확실히 미래로 해석되는 ISO 날짜일 때만 제외한다.
+    """
+    if not effective_date or not _ISO_DATE_RE.match(effective_date):
+        return True
+    reference = today or time.strftime("%Y-%m-%d")
+    return effective_date <= reference
+
 
 @dataclass(frozen=True)
 class Document:
@@ -23,6 +52,8 @@ class Document:
     source_url: str
     text: str
     source_type: str
+    status: str = ""
+    effective_date: str = ""
 
 
 @dataclass(frozen=True)
@@ -92,7 +123,11 @@ class LocalRagRetriever:
                 if len(path.relative_to(self.root).parts) > 1
                 else "rag"
             )
-            documents.append(Document(path, title, _source_url(text), text, source_type))
+            status = _metadata(text, "status")
+            effective_date = _metadata(text, "effective_date")
+            documents.append(
+                Document(path, title, _source_url(text), text, source_type, status, effective_date)
+            )
         return documents
 
     def _chunk_documents(self) -> list[DocumentChunk]:
@@ -110,6 +145,8 @@ class LocalRagRetriever:
         # 남긴다. 공식 근거의 다양성을 확보하고 희소한 정책 문서를 보존한다.
         best_by_document: dict[Path, Evidence] = {}
         for chunk in self.chunks:
+            if not is_effective_now(chunk.document.effective_date):
+                continue
             score = _lexical_score(query, chunk.document.title, chunk.content)
             if score:
                 evidence = Evidence(
@@ -119,6 +156,9 @@ class LocalRagRetriever:
                     score,
                     chunk.content,
                     chunk.parent_content,
+                    chunk.document.source_type,
+                    chunk.document.status,
+                    chunk.document.effective_date,
                 )
                 current = best_by_document.get(chunk.document.path)
                 if current is None or evidence.score > current.score:
@@ -190,6 +230,9 @@ class HybridRagRetriever:
                 "path": f"{chunk.document.path}#{chunk.section}",
                 "content": chunk.content,
                 "parent_content": chunk.parent_content,
+                "source_type": chunk.document.source_type,
+                "status": chunk.document.status,
+                "effective_date": chunk.document.effective_date,
             }
             for chunk in local.chunks
         ]
@@ -239,6 +282,8 @@ class HybridRagRetriever:
         sparse_weight = float(os.getenv("BM25_WEIGHT", "0.4"))
         ranked: list[tuple[float, int]] = []
         for index in set(dense) | set(sparse):
+            if not is_effective_now(self.entries[index].get("effective_date", "")):
+                continue
             score = 0.0
             if index in dense:
                 score += dense_weight / (60 + dense[index][0])
@@ -252,6 +297,8 @@ class HybridRagRetriever:
                 Evidence(
                     entry["title"], entry["source_url"], entry["path"],
                     round(score * 1_000_000), entry["content"], entry["parent_content"],
+                    entry.get("source_type", ""), entry.get("status", ""),
+                    entry.get("effective_date", ""),
                 )
             )
         return results

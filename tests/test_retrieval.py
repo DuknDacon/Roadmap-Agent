@@ -4,6 +4,7 @@ from pathlib import Path
 
 from roadmap_agent.retrieval import HybridRagRetriever, LocalRagRetriever
 from roadmap_agent.retrieval import FallbackRagRetriever
+from roadmap_agent.retrieval import is_effective_now, source_priority
 
 
 class RetrievalTest(unittest.TestCase):
@@ -83,6 +84,66 @@ class RetrievalTest(unittest.TestCase):
         matches = [item for item in result if "청년미래적금" in item.title]
         assert matches, [item.title for item in result]
         assert "가입일 직전 과세기간" in matches[0].content
+
+    def test_is_effective_now_only_excludes_parseable_future_dates(self):
+        assert is_effective_now("", today="2026-09-01") is True
+        assert is_effective_now("현재 시행중", today="2026-09-01") is True
+        assert is_effective_now("2026-01-01", today="2026-09-01") is True
+        assert is_effective_now("2026-09-01", today="2026-09-01") is True
+        assert is_effective_now("2027-01-01", today="2026-09-01") is False
+
+    def test_source_priority_ranks_law_above_educational_content(self):
+        assert source_priority("law") > source_priority("enforcement_decree")
+        assert source_priority("enforcement_decree") > source_priority("tax_guide")
+        assert source_priority("tax_guide") > source_priority("official_guide_synthesis")
+        assert source_priority("official_guide_synthesis") > source_priority("finance_education")
+        assert source_priority("알수없는_타입") == 0
+
+    def test_local_retriever_excludes_not_yet_effective_document(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "future.md").write_text(
+                "---\ntitle: 미래 시행 제도\nsource_url: https://example.test/future\n"
+                "effective_date: 2999-01-01\n---\nISA 미래 개편 내용",
+                encoding="utf-8",
+            )
+            (root / "current.md").write_text(
+                "---\ntitle: 현재 시행 제도\nsource_url: https://example.test/current\n"
+                "effective_date: 2020-01-01\n---\nISA 현재 시행 내용",
+                encoding="utf-8",
+            )
+            result = LocalRagRetriever(root).search("ISA")
+            titles = [item.title for item in result]
+            assert "현재 시행 제도" in titles
+            assert "미래 시행 제도" not in titles
+
+    def test_hybrid_retriever_excludes_not_yet_effective_document(self):
+        class Embeddings:
+            @staticmethod
+            def embed_documents(texts):
+                return [[1.0, 0.0] for _ in texts]
+
+            @staticmethod
+            def embed_query(text):
+                return [1.0, 0.0]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "rag"
+            index = Path(temp_dir) / "index"
+            root.mkdir()
+            (root / "future.md").write_text(
+                "---\ntitle: 미래 시행 제도\neffective_date: 2999-01-01\n---\nISA 미래 개편",
+                encoding="utf-8",
+            )
+            (root / "current.md").write_text(
+                "---\ntitle: 현재 시행 제도\neffective_date: 2020-01-01\n---\nISA 현재 시행",
+                encoding="utf-8",
+            )
+            HybridRagRetriever.build(root, index, Embeddings())
+            result = HybridRagRetriever(index, Embeddings()).search("ISA", limit=5)
+            titles = [item.title for item in result]
+            assert "현재 시행 제도" in titles
+            assert "미래 시행 제도" not in titles
 
     def test_vector_results_keep_one_specific_local_official_document(self):
         class VectorRetriever:

@@ -132,6 +132,39 @@ class GeminiTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len(models.calls), 2)
 
+    def test_conflicting_evidence_is_ordered_by_source_priority_with_instruction(self):
+        class Models:
+            def __init__(self):
+                self.calls = []
+
+            def generate_content(self, **kwargs):
+                self.calls.append(kwargs)
+                return SimpleNamespace(text='{"answer":"정리된 답변","needs_web_search":false}')
+
+        models = Models()
+        explainer = GeminiRoadmapExplainer(client=SimpleNamespace(models=models))
+        # 낮은 우선순위(교육자료) 근거를 먼저 넣어도, 법령 근거가 sources에서
+        # 앞으로 와야 LLM이 그쪽을 우선하도록 유도된다.
+        evidence = [
+            Evidence(
+                "금융꿀팁 교육자료", "", "tip.md", 5, "일반적으로 이렇게 알려져 있다.",
+                source_type="finance_education",
+            ),
+            Evidence(
+                "청년미래적금 법률", "", "law.md", 10, "법률상 요건은 다음과 같다.",
+                source_type="law",
+            ),
+        ]
+
+        explainer.answer_financial_question("법과 꿀팁이 다르면?", evidence)
+
+        sent = models.calls[0]
+        contents = sent["contents"]
+        self.assertLess(contents.index('"청년미래적금 법률"'), contents.index('"금융꿀팁 교육자료"'))
+        instruction = sent["config"].system_instruction
+        self.assertIn("law", instruction)
+        self.assertIn("finance_education", instruction)
+
     def test_web_search_rejects_non_official_grounding_sources(self):
         class WebModels:
             def generate_content(self, **kwargs):

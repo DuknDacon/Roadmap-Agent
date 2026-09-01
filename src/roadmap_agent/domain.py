@@ -72,6 +72,9 @@ class Evidence:
     score: int
     content: str = ""
     parent_content: str = ""
+    source_type: str = ""
+    status: str = ""
+    effective_date: str = ""
 
 
 @dataclass(frozen=True)

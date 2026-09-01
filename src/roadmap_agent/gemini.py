@@ -11,6 +11,7 @@ from typing import Any
 from .domain import Evidence, RoadmapRequest, RoadmapResult
 from .ports import RoadmapExplanation
 from .policy_rules import PolicyRule
+from .retrieval import source_priority
 
 
 def _financial_subquestions(question: str) -> list[str]:
@@ -256,14 +257,20 @@ class GeminiRoadmapExplainer:
 
         if self.web_search_enabled and question in self._web_search_cache:
             return self._web_search_cache[question]
+        # 근거끼리 내용이 다르면 신뢰도가 높은 출처를 먼저 보여줘 LLM이
+        # 그쪽을 우선하도록 유도한다(법령 > 시행령 > 공식 안내 > 교육자료).
+        ordered_evidence = sorted(
+            evidence, key=lambda item: source_priority(item.source_type), reverse=True
+        )
         sources = [
             {
                 "title": item.title,
                 "source_url": item.source_url,
                 "content": item.content,
                 "parent_context": item.parent_content,
+                "source_type": item.source_type,
             }
-            for item in evidence
+            for item in ordered_evidence
             if item.content
         ]
         answer = ""
@@ -286,6 +293,11 @@ class GeminiRoadmapExplainer:
                         "않은 항목을 구분한다. "
                         "추측하지 말고 JSON 객체만 반환한다. answer에는 2~4문장의 직접 답변을, "
                         "근거가 질문의 핵심 조건을 확정하지 못하면 needs_web_search=true를 넣는다. "
+                        "sources 안의 서로 다른 항목이 같은 사안에 대해 다른 내용을 말하면, "
+                        "source_type 기준으로 law > enforcement_decree > tax_guide > "
+                        "official_guide_synthesis > finance_education 순으로 신뢰도가 높은 "
+                        "쪽을 따르고, 그래도 우열을 가릴 수 없으면 추측하지 말고 확인이 "
+                        "필요하다고 답한다. "
                         "키는 answer, needs_web_search다."
                     ),
                     max_output_tokens=500,

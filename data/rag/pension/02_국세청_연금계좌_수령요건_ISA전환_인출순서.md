@@ -4,7 +4,6 @@ source_id: nts_pension_income_scope_7885
 title: 국세청 연금소득 안내 - 연금계좌 수령요건·ISA 전환·인출순서
 source_url: https://www.nts.go.kr/nts/cm/cntnts/cntntsView.do?mi=6449&cntntsId=7885
 publisher: 국세청
-effective_date: current_as_of_2026-08-13
 collected_at: 2026-08-13
 section: 연금계좌 종류·납입요건·연금수령요건·인출순서
 status: verified_official_webpage
