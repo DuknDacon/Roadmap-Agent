@@ -47,6 +47,11 @@ class PolicyBenefit:
     benefit_tier: str = "standard"
     missing_qualification_fields: tuple[str, ...] = ()
     is_stipend_program: bool = False
+    # reason을 세미콜론으로 합치기 전의 원본 조건별 문구 목록 — 채팅 답변의
+    # 자격 요약을 카드로 보여줄 때(conversation.py) 조건 하나하나를 체크리스트
+    # 항목으로 쪼개 보여주기 위해 별도로 들고 있는다. reason은 다른 소비처
+    # (대안/순위 답변)와의 호환을 위해 그대로 둔다.
+    reason_items: tuple[str, ...] = ()
 
 
 class SavingsProductRepository(Protocol):

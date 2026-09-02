@@ -20,6 +20,7 @@ from .schemas import (
     AllocationItem,
     EvidenceItem,
     MissingFieldDetail,
+    PolicyEligibilityCard,
     RoadmapCreateRequest,
     RoadmapResponse,
     RoadmapRequestPatch,
@@ -295,6 +296,7 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
     conversation_status = None
     conversation_intent = None
     request_patch = None
+    policy_eligibility_cards: list[PolicyEligibilityCard] = []
     if payload.question.strip():
         if payload.thread_id is None:
             raise ValueError("대화 요청에는 threadId가 필요합니다.")
@@ -307,6 +309,17 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         result = replace(result, chat_reply=conversation.reply)
         conversation_status = conversation.status.value
         conversation_intent = conversation.intent.value
+        policy_eligibility_cards = [
+            PolicyEligibilityCard(
+                policyId=card.policy_id,
+                name=card.name,
+                tier=card.tier,
+                availability=card.availability,
+                qualificationStatus=card.qualification_status,
+                conditions=list(card.conditions),
+            )
+            for card in conversation.policy_eligibility_cards
+        ]
         request_patch = RoadmapRequestPatch(
             monthlyBudget=request.monthly_budget,
             targetDate=_target_date(request.horizon_months, today),
@@ -356,4 +369,5 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         conversationStatus=conversation_status,
         conversationIntent=conversation_intent,
         requestPatch=request_patch,
+        policyEligibilityCards=policy_eligibility_cards,
     )

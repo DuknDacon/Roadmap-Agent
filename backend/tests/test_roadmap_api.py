@@ -664,8 +664,14 @@ def test_free_text_field_answer_is_reflected_in_request_patch_and_stops_repeatin
 
     assert second.conversation_status == "completed"
     assert second.request_patch.is_sme_employee is False
-    assert "확인 필요 항목" in second.chat_reply
+    # 채팅 답변은 짧은 완료 문구만 담고(실사용자 피드백: 조건을 문장에 다
+    # 이어붙이면 가독성이 나쁘다), 조건별 세부 내용은 카드로 구조화해서 나간다.
+    assert "완료" in second.chat_reply
     assert "financial_income_taxed" not in second.chat_reply
+    assert len(second.policy_eligibility_cards) == 1
+    card = second.policy_eligibility_cards[0]
+    assert any("확인 필요 항목" in c for c in card.conditions)
+    assert not any("financial_income_taxed" in c for c in card.conditions)
     # 규칙 분류기는 이 turn을 UNCLEAR로 떨어뜨리지만, 실제로 만든 응답은
     # 정책 자격 요약이다 — conversationIntent를 UNCLEAR 그대로 보고하면
     # 라우터의 "financial_qa/unclear는 로드맵 카드 억제" 로직이 방금 막
@@ -756,4 +762,7 @@ def test_eligible_policy_reply_never_leaks_raw_dynamic_gate_keys():
 
     assert "P5:artist_certification" not in response.chat_reply
     assert "20260" not in response.chat_reply  # 정책 ID 접두사(연월일시분초) 미노출
-    assert "확인 필요 항목 1건" in response.chat_reply
+    assert len(response.policy_eligibility_cards) == 1
+    card = response.policy_eligibility_cards[0]
+    assert "P5:artist_certification" not in " ".join(card.conditions)
+    assert "확인 필요 항목 1건" in card.conditions

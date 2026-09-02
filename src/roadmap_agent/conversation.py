@@ -55,6 +55,21 @@ class ConversationResponse:
     changes: tuple[str, ...] = ()
     evidence: tuple[Evidence, ...] = ()
     state_history: tuple[str, ...] = ("draft", "processing", "completed")
+    # 정책 자격 요약을 채팅 문장 하나로 뭉치지 않고 카드로 보여주기 위한
+    # 구조화된 데이터. reply는 "로드맵을 완료했습니다" 같은 짧은 문장만
+    # 담고, 조건별 세부 내용은 여기서만 나온다(실사용자 피드백: 문장
+    # 나열형 답변이 가독성이 나쁘다는 지적으로 이 필드를 추가).
+    policy_eligibility_cards: tuple["PolicyEligibilityCard", ...] = ()
+
+
+@dataclass(frozen=True)
+class PolicyEligibilityCard:
+    policy_id: str
+    name: str
+    tier: str
+    availability: str
+    qualification_status: str
+    conditions: tuple[str, ...]
 
 
 _CHANGE_TERMS = re.compile(
@@ -888,8 +903,13 @@ def execute_conversation(
         )
     policies = policy_repository.find_candidates(replace(updated_policy_request, question=message))
     eligible = [item for item in policies if item.eligible]
+    cards: tuple[PolicyEligibilityCard, ...] = ()
     if eligible:
-        details = []
+        # 정책 여러 개의 조건을 문장 하나로 이어붙이면(예전 방식) 가독성이
+        # 크게 떨어진다는 실사용자 피드백으로, 채팅에는 짧은 완료 문구만
+        # 남기고 조건별 세부 내용은 policy_eligibility_cards로 구조화해
+        # 프론트가 카드로 렌더하게 한다.
+        built_cards = []
         for item in eligible[:3]:
             availability = {
                 True: "현재 모집 확인",
@@ -911,14 +931,19 @@ def execute_conversation(
             # 합성 키나 snake_case 필드명이라 그대로 이어붙이면 사용자에게 원본
             # 식별자가 그대로 노출된다(예: "20260625005400113245:no_business_
             # registration") — 사람이 읽을 문구가 아니라 개수만 안내한다.
-            missing = (
-                f", 확인 필요 항목 {len(item.missing_qualification_fields)}건"
-                if item.missing_qualification_fields else ""
-            )
-            details.append(
-                f"{item.name}({qualification}, {tier}, {availability}{missing}: {item.reason})"
-            )
-        reply = "현재 입력으로 자격 가능성이 확인된 정책상품은 " + ", ".join(details) + "입니다."
+            conditions = list(item.reason_items)
+            if item.missing_qualification_fields:
+                conditions.append(f"확인 필요 항목 {len(item.missing_qualification_fields)}건")
+            built_cards.append(PolicyEligibilityCard(
+                policy_id=item.policy_id,
+                name=item.name,
+                tier=tier,
+                availability=availability,
+                qualification_status=qualification,
+                conditions=tuple(conditions),
+            ))
+        cards = tuple(built_cards)
+        reply = "조건을 모두 반영하여 자산관리 로드맵을 완료했습니다."
     else:
         reply = "현재 입력과 조회 결과로 자격이 확인된 정책상품이 없습니다. 탈락 사유와 모집상태를 공식 공고에서 다시 확인해 주세요."
     return _finish(ConversationResponse(
@@ -936,4 +961,5 @@ def execute_conversation(
         reply,
         plan.tools,
         tuple(policy_changes),
+        policy_eligibility_cards=cards,
     ))

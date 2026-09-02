@@ -111,6 +111,18 @@ class MissingFieldDetail(ApiModel):
     input_type: str = Field(default="boolean", alias="inputType")
 
 
+class PolicyEligibilityCard(ApiModel):
+    """정책 자격 요약 카드 하나. 채팅 답변 문장에 조건을 다 이어붙이던 걸
+    (실사용자 피드백: 가독성 나쁨) 프론트가 카드로 렌더할 수 있게 구조화한다."""
+
+    policy_id: str = Field(alias="policyId")
+    name: str
+    tier: str
+    availability: str
+    qualification_status: str = Field(alias="qualificationStatus")
+    conditions: list[str]
+
+
 class RoadmapResponse(ApiModel):
     recommended: ScenarioResponse | None = None
     alternative: ScenarioResponse | None = None
@@ -133,6 +145,9 @@ class RoadmapResponse(ApiModel):
     # 하위호환을 위해 그대로 둔다.
     missing_field_details: list[MissingFieldDetail] = Field(
         default_factory=list, alias="missingFieldDetails"
+    )
+    policy_eligibility_cards: list[PolicyEligibilityCard] = Field(
+        default_factory=list, alias="policyEligibilityCards"
     )
 
 
