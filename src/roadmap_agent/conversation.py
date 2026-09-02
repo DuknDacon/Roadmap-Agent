@@ -757,32 +757,39 @@ def execute_conversation(
             plan.tools,
             tuple(changes),
         ))
+    # 아래 다섯 개 분기는 이번 turn의 "주된" 의도(설명/대안/순위/QA/입력보완)를
+    # 처리하는 코드지만, apply_policy_answers가 같은 메시지에서 자격조건
+    # 필드(가구소득/금융소득종합과세/중소기업재직/직전년도소득)를 이미 성공
+    # 적으로 파싱해뒀을 수 있다 — 원래 `request`를 그대로 돌려주면 그 값이
+    # request_patch에 실리지 않아 라우터/프론트 프로필에 반영되지 않고, 다음
+    # turn에 같은 질문이 반복되는 버그가 생긴다. 항상 `updated_policy_request`
+    # 를 돌려줘 어떤 의도로 분류되든 파싱된 자격조건 답변이 유실되지 않게 한다.
     if plan.intent == ConversationIntent.RESULT_EXPLANATION:
         try:
             explained, reply = explain_existing_result(
-                request, result, message, explainer, context
+                updated_policy_request, result, message, explainer, context
             )
         except Exception:
             reply = result_reply(result, message, context)
             explained = replace(result, chat_reply=reply)
         return _finish(ConversationResponse(
-            ConversationStatus.COMPLETED, plan.intent, request, explained, reply, plan.tools
+            ConversationStatus.COMPLETED, plan.intent, updated_policy_request, explained, reply, plan.tools
         ))
     if plan.intent == ConversationIntent.PRODUCT_ALTERNATIVES:
         reply = alternative_products_reply(
-            request, result, message, policy_repository, savings_repository
+            updated_policy_request, result, message, policy_repository, savings_repository
         )
         return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
-            request,
+            updated_policy_request,
             replace(result, chat_reply=reply),
             reply,
             plan.tools,
         ))
     if plan.intent == ConversationIntent.PRODUCT_RANKING:
         reply = ranked_products_reply(
-            request,
+            updated_policy_request,
             result,
             message,
             context,
@@ -792,7 +799,7 @@ def execute_conversation(
         return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
-            request,
+            updated_policy_request,
             replace(result, chat_reply=reply),
             reply,
             plan.tools,
@@ -805,7 +812,7 @@ def execute_conversation(
         return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
-            request,
+            updated_policy_request,
             result,
             evidence_reply(message, evidence, explainer),
             plan.tools,
@@ -815,9 +822,9 @@ def execute_conversation(
         return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
-            request,
+            updated_policy_request,
             result,
-            input_gap_reply(request),
+            input_gap_reply(updated_policy_request),
             plan.tools,
         ))
 
