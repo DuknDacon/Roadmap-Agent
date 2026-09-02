@@ -228,8 +228,22 @@ def plan_conversation(
     planner: ConversationPlanner | None = None,
     result: RoadmapResult | None = None,
     context: str = "",
+    answering_missing_fields: bool = False,
 ) -> ConversationPlan:
-    intent = classify_intent(message, result, context)
+    # ProfileAskForm 제출은 프론트가 "이번 필드=값, 저번 필드=값, ..." 식으로
+    # 여러 필드의 라벨/힌트 문구를 한 문장에 이어붙여 보낸다 — 실제 사용자
+    # 발화가 아니라 기계가 만든 요약이라, 그 안에 우연히 다른 의도의 키워드가
+    # 섞여 있을 수 있다(예: 어느 게이트의 힌트 문구에 "납입"+"한도"가 같이
+    # 들어있으면 classify_intent가 RESULT_EXPLANATION으로 오분류해 엉뚱한
+    # "월 납입한도는 OO원입니다" 답이 나온다 — 실사용자 피드백으로 발견).
+    # answering_missing_fields 신호가 있으면 규칙 분류를 아예 타지 않고
+    # POLICY_ELIGIBILITY로 확정한다 — 이 신호는 항상 "방금 자격조건에
+    # 답했다"는 뜻이라 다른 의도일 수가 없다.
+    intent = (
+        ConversationIntent.POLICY_ELIGIBILITY
+        if answering_missing_fields
+        else classify_intent(message, result, context)
+    )
     if intent == ConversationIntent.CONDITION_CHANGE:
         return ConversationPlan(intent, INTENT_TOOLS[intent])
     if intent == ConversationIntent.RESULT_EXPLANATION:
@@ -733,7 +747,10 @@ def execute_conversation(
     t0 = time.monotonic()
     print(f"[CV-01] execute_conversation 진입 | message={message[:80]!r}")
     updated_policy_request, policy_changes = apply_policy_answers(request, message, context)
-    plan = plan_conversation(updated_policy_request, message, planner, result, context)
+    plan = plan_conversation(
+        updated_policy_request, message, planner, result, context,
+        answering_missing_fields=answering_missing_fields,
+    )
     print(
         f"[CV-02] intent={plan.intent.value} planned_by={plan.planned_by} "
         f"tools={list(plan.tools)}"

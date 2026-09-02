@@ -684,6 +684,31 @@ def test_financial_qa_gate_hint_fallback_is_noop_without_matching_gate():
     assert "무관정책" not in response.reply
 
 
+def test_answering_missing_fields_forces_policy_eligibility_despite_keyword_collision():
+    """ProfileAskForm 제출 문구는 프론트가 "필드=값" 여러 개를 이어붙여 만든
+    기계 생성 텍스트다 — 그 안에 우연히 다른 의도의 키워드(예: 어느 게이트
+    힌트에 "납입"+"한도"가 같이 들어있으면 RESULT_EXPLANATION으로 오분류)가
+    섞여 있어도, answering_missing_fields 신호가 있으면 규칙 분류를 타지
+    않고 항상 POLICY_ELIGIBILITY로 처리해야 한다(실사용자 피드백으로 발견:
+    게이트 답변 제출 후 엉뚱한 "월 납입한도는 OO원입니다" 답이 나왔음)."""
+    class NoOpRetriever:
+        def search(self, query, limit=3):
+            return []
+
+    response = execute_conversation(
+        base_request(), base_result(),
+        "추가 정보를 반영해서 자산관리 로드맵을 다시 만들어줘. 제공된 정보: "
+        "월 납입 한도 안내=true",
+        run_roadmap_fn=lambda *args, **kwargs: None,
+        policy_repository=Policies(), savings_repository=EmptySavings(),
+        retriever=NoOpRetriever(),
+        answering_missing_fields=True,
+    )
+
+    assert response.intent == ConversationIntent.POLICY_ELIGIBILITY
+    assert "납입" not in response.reply
+
+
 def test_llm_planner_handles_ambiguous_condition_change_with_whitelisted_tools():
     class Planner:
         def plan(self, request, message):
