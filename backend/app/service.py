@@ -6,10 +6,12 @@ from datetime import date, datetime, timezone
 from hashlib import sha1
 
 from roadmap_agent.conversation import (
+    ConversationIntent,
     FINANCIAL_INCOME_TAXED_QUESTION,
     HOUSEHOLD_MONTHLY_INCOME_QUESTION,
     IS_SME_EMPLOYEE_QUESTION,
     PREVIOUS_ANNUAL_INCOME_QUESTION,
+    classify_intent,
 )
 from roadmap_agent.domain import RiskProfile, RoadmapRequest, Scenario
 from roadmap_agent.orchestrator import build_conversation_graph, run_roadmap
@@ -91,6 +93,24 @@ _PRELAUNCH_FIELD_INPUT_TYPES: dict[str, str] = {
     "household_monthly_income": "number",
     "previous_annual_income": "number",
 }
+
+
+def _should_check_missing_fields(payload: RoadmapCreateRequest) -> bool:
+    """로드맵 계산 전에 미확인 자격조건 필드부터 물어야 하는 turn인지 판단한다.
+
+    이 게이트는 최초 생성 요청(question 없음), 게이트 답변 제출임을 프론트가
+    명시한 turn(answering_missing_fields), 또는 사용자가 실제로 정책 자격을
+    묻는 turn(POLICY_ELIGIBILITY)에만 적용한다. 그 외(추천 이유 설명, 금융
+    Q&A, 조건 변경, 불명확 요청 등)는 로드맵이 미완성이어도 그 자체로 정상
+    응답해야 하는 의도라 게이트를 건너뛴다 — 예전엔 이 turn이 뭐든 상관없이
+    미확인 필드가 하나라도 남아있으면 무조건 그 질문 문구만 돌려줘서, 사용자가
+    "왜 추천?"이나 순수 금융 지식을 물어도 매번 같은 문구만 반복되는 버그가
+    있었다.
+    """
+    question = payload.question.strip()
+    if not question or payload.answering_missing_fields:
+        return True
+    return classify_intent(question) == ConversationIntent.POLICY_ELIGIBILITY
 
 
 def _prelaunch_missing_fields(request: RoadmapRequest, runtime) -> list[str]:
@@ -236,7 +256,13 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
     # 로드맵을 계산하기 전에, DB 매칭 후보 중 사용자 입력만으로는 판정 못 하는
     # 필드가 걸리는 게 있으면 로드맵 없이 먼저 물어본다(한 번에 여러 개일 수
     # 있음 — ProfileAskForm 은 fields 배열을 그대로 받아 한 카드에 렌더한다).
-    missing_fields = _prelaunch_missing_fields(request, runtime)
+    # 단, 이 turn이 실제로 그 확인을 필요로 하는 의도일 때만 — 판단 기준은
+    # _should_check_missing_fields 참고.
+    missing_fields = (
+        _prelaunch_missing_fields(request, runtime)
+        if _should_check_missing_fields(payload)
+        else []
+    )
     if missing_fields:
         details = _missing_field_details(missing_fields, runtime)
         return RoadmapResponse(
@@ -275,6 +301,10 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
             targetDate=_target_date(request.horizon_months, today),
             targetAmount=request.target_amount,
             hasEmergencyFund=request.has_emergency_fund,
+            isSmeEmployee=request.is_sme_employee,
+            financialIncomeTaxed=request.financial_income_taxed,
+            householdMonthlyIncome=request.household_monthly_income,
+            previousAnnualIncome=request.previous_annual_income,
             investmentCap=(
                 round(request.max_investment_ratio * 100)
                 if request.max_investment_ratio is not None

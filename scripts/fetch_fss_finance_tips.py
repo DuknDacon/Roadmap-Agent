@@ -385,16 +385,30 @@ def _month_windows(start: date, end: date) -> list[tuple[date, date]]:
     return windows
 
 
-TAG_RE = re.compile(r"<[^>]+>")
+# 실제 HTML 태그 이름만 매칭한다 — 그냥 "<[^>]+>"로 아무 꺾쇠나 지우면, 일부
+# 게시물 제목이 스타일 표기로 쓰는 "<시리즈 제3편 투자>" 같은 텍스트(HTML 태그가
+# 아님)까지 지워져 "신입사원의 금융상품 현명하게 가입하기<시리즈 제3편 투자>"와
+# "<시리즈 제4편 신용카드>"가 서로 다른 글인데도 같은 제목으로 뭉개진다.
+_HTML_TAG_NAMES = (
+    "div|img|p|br|span|a|table|thead|tbody|tfoot|tr|td|th|ul|ol|li|"
+    "h[1-6]|strong|em|b|i|u|font|center|blockquote|hr"
+)
+TAG_RE = re.compile(rf"</?(?:{_HTML_TAG_NAMES})\b[^>]*/?>", re.IGNORECASE)
 SPACE_RE = re.compile(r"[ \t\r\f\v]+")
 BLANK_RE = re.compile(r"\n{3,}")
 
 
 def clean_html(raw: str) -> str:
+    # API가 내려주는 본문은 실제 태그가 아니라 HTML 엔티티로 이스케이프된 채로
+    # 온다(예: "&lt;div&gt;..."). 엔티티를 먼저 풀어야 <br>/</p> 등이 진짜
+    # 태그로 나타나 아래 정리 규칙이 실제로 걸린다 — 순서가 반대면(예전 코드)
+    # 스트리핑 시점엔 아직 "&lt;"라 아무것도 못 지우고, 그 뒤에 풀린 태그만
+    # 그대로 남아 본문에 raw HTML이 섞여 들어간다.
+    raw = html.unescape(raw)
     raw = re.sub(r"(?i)<br\s*/?>", "\n", raw)
     raw = re.sub(r"(?i)</(?:p|div|li|tr|h[1-6])>", "\n", raw)
     raw = TAG_RE.sub("", raw)
-    raw = html.unescape(raw).replace("\xa0", " ")
+    raw = raw.replace("\xa0", " ")
     lines = [SPACE_RE.sub(" ", line).strip() for line in raw.splitlines()]
     return BLANK_RE.sub("\n\n", "\n".join(lines)).strip()
 

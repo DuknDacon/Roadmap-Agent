@@ -47,6 +47,12 @@ class RoadmapCreateRequest(ApiModel):
     dynamic_gate_answers: dict[str, bool] = Field(
         default_factory=dict, alias="dynamicGateAnswers"
     )
+    # 이번 turn이 미확인 자격조건 필드(profile_ask/동적 게이트) 답변 제출인지
+    # 프론트가 명시적으로 표시하는 신호. question 텍스트만으로는 "게이트 답변
+    # 제출"과 "사용자가 그냥 애매한 말을 한 것"을 구분할 수 없어(둘 다
+    # classify_intent 상 UNCLEAR로 분류됨) 별도 필드로 받는다 —
+    # service.py:_should_check_missing_fields 참고.
+    answering_missing_fields: bool = Field(default=False, alias="answeringMissingFields")
 
     @field_validator("target_date")
     @classmethod
@@ -131,6 +137,20 @@ class RoadmapRequestPatch(ApiModel):
     target_amount: int | None = Field(alias="targetAmount")
     has_emergency_fund: bool = Field(alias="hasEmergencyFund")
     investment_cap: int | None = Field(alias="investmentCap")
+    # 자유텍스트로 답변된 사전 체크 필드(apply_policy_answers)도 함께 실어보내야
+    # 라우터/프론트의 프로필 캐시가 갱신된다 — 이게 빠지면 Roadmap-Agent 내부적으론
+    # 답을 파싱해 반영해놓고도, 다음 turn에 라우터가 여전히 옛(미확인) 값을
+    # 그대로 재전송해 같은 질문이 무한 반복되는 버그가 생긴다.
+    is_sme_employee: bool | None = Field(default=None, alias="isSmeEmployee")
+    financial_income_taxed: bool | None = Field(
+        default=None, alias="financialIncomeTaxed"
+    )
+    household_monthly_income: int | None = Field(
+        default=None, alias="householdMonthlyIncome"
+    )
+    previous_annual_income: int | None = Field(
+        default=None, alias="previousAnnualIncome"
+    )
 
 
 class ApiError(ApiModel):

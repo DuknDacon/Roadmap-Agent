@@ -245,6 +245,20 @@ def test_other_product_question_uses_candidate_search_intent():
     assert "가구 전체의 월소득" not in response.chat_reply
 
 
+def test_government_contribution_legal_basis_question_is_financial_qa_not_policy_eligibility():
+    """"정부기여금"은 POLICY_TERMS에 걸리지만, "법적 근거"를 묻는 순수 정보성
+    질문까지 policy_eligibility로 오분류하면 안 된다(RAG 테스트 #7 재현) —
+    질문과 무관한 자격판정 상품 목록만 돌아오고 실제 질문엔 전혀 답을 안 하던
+    버그."""
+    response = roadmap(RoadmapCreateRequest(
+        **PAYLOAD,
+        question="청년미래적금 정부기여금은 어떤 법적 근거로 지급돼?",
+        threadId=uuid4(),
+    ))
+
+    assert response.conversation_intent == "financial_qa"
+
+
 def test_product_ranking_followup_does_not_fall_through_to_rag():
     response = roadmap(RoadmapCreateRequest(
         **PAYLOAD,
@@ -476,3 +490,169 @@ def test_second_call_answering_dynamic_gate_false_builds_roadmap_with_ineligible
     # (이 상품 자체는 ineligible이지만, 그건 로드맵 계산 내부에서 걸러질 문제다).
     assert response.conversation_status != "needs_input"
     assert response.recommended is not None
+
+
+# ── 사전 체크 게이트가 turn의 의도와 무관하게 무조건 걸리던 버그의 회귀 테스트.
+# 미확인 필드(financial_income_taxed)가 남아있는 상태에서도, 그 필드와 무관한
+# 의도(금융 Q&A/추천 이유 설명/불명확 요청)는 정상 응답해야 하고, 반대로 실제
+# 정책 자격 질문이나 게이트 답변 제출은 여전히 게이트가 걸려야 한다.
+def test_financial_qa_question_answers_even_when_prelaunch_field_missing():
+    """로드맵이 미완성(사전 체크 필드 미확인)이어도 순수 금융 지식 질문은
+    필드와 무관하므로 정상적으로(RAG 미검색 응답이라도) 답해야지, 미확인
+    필드 질문만 앵무새처럼 돌아오면 안 된다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=FinancialIncomeTaxedGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        response = roadmap(RoadmapCreateRequest(
+            **PAYLOAD, question="ISA 세액공제 한도가 얼마야?", threadId=uuid4()
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.chat_reply != "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+    assert response.conversation_intent == "financial_qa"
+
+
+def test_result_explanation_question_answers_even_when_prelaunch_field_missing():
+    """"왜 추천?" 같은 결과 설명 요청도 미확인 필드 게이트에 막히지 않고 실제
+    설명(잠정 로드맵 기준)으로 답해야 한다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=FinancialIncomeTaxedGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        response = roadmap(RoadmapCreateRequest(
+            **PAYLOAD, question="왜 이 상품을 추천했어?", threadId=uuid4()
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.chat_reply != "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+    assert response.chat_reply.startswith("현재 최우선안은")
+
+
+def test_unclear_question_skips_gate_when_prelaunch_field_missing():
+    """사용자가 그냥 애매한 말을 한 turn은 answeringMissingFields 신호가 없으므로
+    게이트를 건너뛰고 기존의 일반 UNCLEAR 안내문을 받아야 한다 — 미확인 필드
+    질문만 반복되던 버그의 핵심 재현 케이스."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=FinancialIncomeTaxedGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        response = roadmap(RoadmapCreateRequest(
+            **PAYLOAD, question="더 좋은 걸로 해줘", threadId=uuid4()
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert "조건을 변경하려는 것인지" in response.chat_reply
+    assert response.chat_reply != "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+
+
+def test_policy_eligibility_question_still_gates_when_prelaunch_field_missing():
+    """정책 자격을 실제로 묻는 turn은 그 필드가 정말 필요하므로 기존처럼
+    게이트가 걸려야 한다 — 화이트리스트가 이 케이스까지 풀어버리면 안 된다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=FinancialIncomeTaxedGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        response = roadmap(RoadmapCreateRequest(
+            **PAYLOAD, question="이 정책 자격이 되는지 알려줘", threadId=uuid4()
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.recommended is None
+    assert response.conversation_status == "needs_input"
+    assert response.chat_reply == "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+
+
+def test_answering_missing_fields_flag_keeps_gate_even_for_unclear_looking_text():
+    """profile_ask 답변 제출은 프론트가 고정 문구("추가 정보를 반영해서...")로
+    보내 텍스트만 보면 UNCLEAR와 구분이 안 된다 — answeringMissingFields 신호로
+    여전히 게이트가 걸려, 아직 남은 다른 미확인 필드를 건너뛰지 않아야 한다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=FinancialIncomeTaxedGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        response = roadmap(RoadmapCreateRequest(
+            **PAYLOAD,
+            question="추가 정보를 반영해서 자산관리 로드맵을 다시 만들어줘. 제공된 정보: 가구원 수=1",
+            answeringMissingFields=True,
+            threadId=uuid4(),
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.recommended is None
+    assert response.conversation_status == "needs_input"
+    assert response.chat_reply == "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+
+
+def test_free_text_field_answer_is_reflected_in_request_patch_and_stops_repeating():
+    """자유텍스트로 명확히 답한 자격조건 필드(예: "중소기업 재직 안 해요")는 그
+    턴의 의도가 UNCLEAR로 떨어지더라도 반영되어야 하고, 그 반영 결과가
+    request_patch로 프론트/라우터에 실려가야 다음 턴에 같은 질문이 반복되지
+    않는다. 게이트가 완전히 안 풀린 나머지 필드(financial_income_taxed)는
+    여전히 안내돼야 한다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=MultiFieldGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        payload = {**PAYLOAD, "isSmeEmployee": None}
+        first = roadmap(RoadmapCreateRequest(**payload, threadId=uuid4()))
+        assert set(first.missing_fields) == {"financial_income_taxed", "is_sme_employee"}
+
+        second = roadmap(RoadmapCreateRequest(
+            **payload, question="중소기업 재직 안 해요", threadId=uuid4()
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert second.conversation_status == "completed"
+    assert second.request_patch.is_sme_employee is False
+    assert "누락" in second.chat_reply
+    assert "financial_income_taxed" in second.chat_reply
+
+
+def test_household_income_answered_by_chat_persists_across_separate_http_requests():
+    """Agentic AI화 페이지에 남아있던 이슈 재현: 채팅으로 답한 가구소득이
+    같은 threadId 안에서만 유지되고 별개 HTTP 요청(클라이언트가 다음 턴에
+    request_patch를 그대로 재전송)에서는 사라지던 문제. RoadmapRequestPatch에
+    household_monthly_income이 있어야, 이번 턴에 채팅으로 답한 값을 클라이언트가
+    프로필에 반영해 다음 요청에 다시 실어보낼 수 있다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=HouseholdIncomeGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        first = roadmap(RoadmapCreateRequest(**PAYLOAD, threadId=uuid4()))
+        assert first.missing_fields == ["household_monthly_income"]
+
+        second = roadmap(RoadmapCreateRequest(
+            **PAYLOAD, question="가구 월소득은 350만원이야", threadId=uuid4()
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert second.request_patch.household_monthly_income == 3_500_000

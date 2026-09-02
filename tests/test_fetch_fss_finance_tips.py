@@ -182,6 +182,29 @@ class FetchFssFinanceTipsTest(unittest.TestCase):
         for previous, current in zip(windows, windows[1:]):
             self.assertEqual(previous[1] + MODULE.timedelta(days=1), current[0])
 
+    def test_clean_html_strips_html_entity_escaped_tags(self):
+        """실제 API 응답은 CDATA가 아니라 본문 전체가 HTML 엔티티로 이스케이프된
+        채로 온다(예: 신용점수 관련 금융꿀팁 문서들) — "&lt;p&gt;내용&lt;/p&gt;"
+        처럼. unescape가 태그 스트리핑보다 먼저 실행돼야 실제 태그로 풀린 뒤
+        지워지지, 순서가 반대면 이스케이프된 채로 스트리핑을 통과해버린 뒤에야
+        풀려서 원본 HTML이 그대로 결과에 남는다."""
+        escaped = "&lt;p&gt;신용등급을 올리려면 연체 없이 소액이라도 꾸준히 상환하세요.&lt;/p&gt;"
+        cleaned = MODULE.clean_html(escaped)
+        self.assertEqual(cleaned, "신용등급을 올리려면 연체 없이 소액이라도 꾸준히 상환하세요.")
+        self.assertNotIn("<p>", cleaned)
+        self.assertNotIn("&lt;", cleaned)
+
+    def test_clean_html_of_image_only_escaped_body_is_empty(self):
+        """본문 전체가 이스케이프된 <img> 태그뿐인 경우(실제 텍스트 없음) —
+        unescape 순서가 고쳐지면 이제야 정상적으로 빈 문자열로 판정되고,
+        write_outputs의 "본문이 이미지로만 구성되어 있습니다" 안내 문구가
+        제대로 걸린다."""
+        escaped = (
+            "&lt;div class='dbdata'&gt;&lt;img src='https://example.com/a.png' "
+            "alt='' style='width: 670px;'/&gt;&lt;/div&gt;"
+        )
+        self.assertEqual(MODULE.clean_html(escaped), "")
+
 
 if __name__ == "__main__":
     unittest.main()

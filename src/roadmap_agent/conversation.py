@@ -65,6 +65,13 @@ _INVESTMENT_CHANGE = re.compile(
 )
 _RESULT_TERMS = re.compile(r"(왜|추천\s*이유|대안|결과|근거|부족액|달성률)")
 _POLICY_TERMS = re.compile(r"(정책|지원금|정부\s*기여금|우대형|일반형|자격|모집)")
+# "정부기여금" 자체는 상품 기능(정부가 얹어주는 지원금)에 대한 일반 지식 질문에도
+# 흔히 등장한다 — "정부기여금은 어떤 법적 근거로 지급돼?" 같은 질문은 사용자의
+# 자격 여부를 묻는 게 아니라 제도 자체를 묻는 순수 RAG(financial_qa) 질문인데,
+# _POLICY_TERMS가 무조건 먼저 걸려 policy_eligibility로 오분류되면서 질문에
+# 전혀 답하지 않는 문제가 있었다(RAG 테스트 #7). "법적 근거"류 정보성 질문일
+# 때만 이 예외를 적용해 아래 FINANCE_TERMS/RESULT_TERMS 판단으로 넘어가게 한다.
+_POLICY_INFO_QUESTION = re.compile(r"(법적\s*근거|근거\s*법|법에\s*근거|어떤\s*법|무슨\s*법)")
 _FINANCE_TERMS = re.compile(r"(ISA|연금|세액공제|비과세|적금|투자|채권|주식|금리|세금)", re.I)
 _MISSING_TERMS = re.compile(r"(무엇을|뭘|어떤\s*정보|입력.*(?:필요|부족)|누락)")
 _CURRENT_RESULT_TERMS = re.compile(
@@ -172,7 +179,7 @@ def classify_intent(
         return ConversationIntent.PRODUCT_ALTERNATIVES
     if _matches_current_scenario(result, text):
         return ConversationIntent.RESULT_EXPLANATION
-    if _POLICY_TERMS.search(text):
+    if _POLICY_TERMS.search(text) and not _POLICY_INFO_QUESTION.search(text):
         return ConversationIntent.POLICY_ELIGIBILITY
     if _CURRENT_RESULT_TERMS.search(text):
         return ConversationIntent.RESULT_EXPLANATION
@@ -702,7 +709,17 @@ def execute_conversation(
         )
         return response
 
-    if plan.clarification_question:
+    # UNCLEAR로 분류된 turn이 실제로는 자유텍스트 자격조건 답변이었던 경우
+    # (예: "중소기업 재직 안 해요"는 정책/자격 키워드가 없어 POLICY_ELIGIBILITY로
+    # 안 잡히고 UNCLEAR로 떨어진다) — 이미 apply_policy_answers가 위에서 값을
+    # 성공적으로 파싱해 반영했는데, 이 분기가 무조건 앞서면 "조건을 변경하려는
+    # 것인지..." 같은 일반 안내문만 보여주고 아래 재계산 로직(정책 자격/재계산)
+    # 에는 영영 도달하지 못한다 — 답을 반영해놓고도 사용자에게는 같은 질문이
+    # 반복되는 것처럼 보이는 버그의 핵심 원인. POLICY_ELIGIBILITY가 남은 필드를
+    # 마저 물어보는 정상적인 clarification_question은 그대로 둔다.
+    if plan.clarification_question and not (
+        plan.intent == ConversationIntent.UNCLEAR and policy_changes
+    ):
         return _finish(ConversationResponse(
             ConversationStatus.NEEDS_INPUT,
             plan.intent,
