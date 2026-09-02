@@ -184,6 +184,37 @@ class RepositoriesTest(unittest.TestCase):
         self.assertTrue(policy.eligible)
         self.assertNotIn("P1:artist_certification", policy.missing_qualification_fields)
 
+    def test_multiple_satisfied_gates_summarize_reason_by_count_not_full_text(self):
+        """게이트가 여러 개(실제로는 9개까지도 있음) 모두 충족이면, reason에
+        질문 문구를 하나씩 다 나열하지 않고 개수로만 요약해야 한다 — 안 그러면
+        정책 자격 요약 답변이 문장 나열로 도배된다(실사용자 피드백으로 발견)."""
+        registry = DynamicGateRegistry(
+            {
+                "P1": [
+                    DynamicGate(policy_id="P1", gate_id="gate_a", question="조건 A를 만족하나요?", hint=""),
+                    DynamicGate(policy_id="P1", gate_id="gate_b", question="조건 B를 만족하나요?", hint=""),
+                    DynamicGate(policy_id="P1", gate_id="gate_c", question="조건 C를 만족하나요?", hint=""),
+                ]
+            }
+        )
+        request = RoadmapRequest(
+            **{
+                **self.request.__dict__,
+                "dynamic_gate_answers": {
+                    "P1:gate_a": True, "P1:gate_b": True, "P1:gate_c": None,
+                },
+            }
+        )
+        policy = map_youth_policy_row(
+            self._row_with_dynamic_gate(), request, as_of=date(2026, 8, 13),
+            gate_registry=registry,
+        )
+        assert policy is not None
+        self.assertIn("동적 자격조건 2건 충족", policy.reason)
+        self.assertIn("동적 자격조건 1건 확인 필요", policy.reason)
+        self.assertNotIn("조건 A를 만족하나요?", policy.reason)
+        self.assertNotIn("조건 C를 만족하나요?", policy.reason)
+
     def test_dynamic_gate_first_false_answer_stops_asking_remaining_gates(self):
         """상품 하나에 게이트가 여러 개일 때, 앞 게이트에서 이미 탈락이 확정되면
         같은 상품의 나머지 게이트는 더 묻지 않는다 — 이미 못 받는 상품인데

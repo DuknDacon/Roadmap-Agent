@@ -160,15 +160,23 @@ def _apply_dynamic_gates(
     """DynamicGateRegistry가 발견한 게이트(4개 하드코딩 필드를 넘어서는 예/아니오
     자격조건)를 missing_fields/reasons/eligible에 접어넣는다. LLM은 이 gate.question을
     만들었을 뿐이고, 답변을 보고 eligible을 계산하는 건 여기 이 코드다.
+
+    게이트가 상품마다 여러 개(많으면 9개 이상)라, 만족/대기 중인 게이트마다
+    질문 문구를 통째로 reasons에 쌓으면 챗봇 답변이 문장 나열로 도배된다
+    (실사용자 피드백으로 발견). 실제로 사용자가 알아야 할 건 "몇 개나
+    확인됐는지"와 "왜 탈락했는지"뿐이라, 만족/대기는 개수로만 요약하고
+    탈락 사유 하나만 원문 그대로 남긴다.
     """
     if gate_registry is None:
         return eligible
+    satisfied = 0
+    pending = 0
     for gate in gate_registry.gates_for(policy_id):
         composite = DynamicGateRegistry.composite_id(policy_id, gate.gate_id)
         answer = request.dynamic_gate_answers.get(composite)
         if answer is None:
             missing_fields.append(composite)
-            reasons.append(f"{gate.question} 확인 필요")
+            pending += 1
         elif answer is False:
             eligible = False
             reasons.append(f"{gate.question} — 미충족")
@@ -178,7 +186,11 @@ def _apply_dynamic_gates(
             # 첫 탈락 사유라는 뜻).
             break
         else:
-            reasons.append(f"{gate.question} — 충족")
+            satisfied += 1
+    if satisfied:
+        reasons.append(f"동적 자격조건 {satisfied}건 충족")
+    if pending:
+        reasons.append(f"동적 자격조건 {pending}건 확인 필요")
     return eligible
 
 
