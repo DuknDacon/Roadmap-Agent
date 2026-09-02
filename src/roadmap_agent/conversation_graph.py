@@ -34,6 +34,7 @@ class RoadmapConversationGraph:
         retriever: RagRetriever,
         explainer: RoadmapExplainer | None = None,
         planner=None,
+        gate_registry=None,
         checkpointer: BaseCheckpointSaver | None = None,
         session_store: SqliteConversationStore | None = None,
     ) -> None:
@@ -42,6 +43,7 @@ class RoadmapConversationGraph:
         self.retriever = retriever
         self.explainer = explainer
         self.planner = planner
+        self.gate_registry = gate_registry
         self.session_store = session_store
         # SQLite 체크포인터는 스레드 동시 접근에 안전하지 않으므로 대화 실행을 직렬화한다.
         self._invoke_lock = threading.Lock()
@@ -67,6 +69,7 @@ class RoadmapConversationGraph:
             retriever=self.retriever,
             explainer=self.explainer,
             planner=self.planner,
+            gate_registry=self.gate_registry,
             context=context,
         )
         return {

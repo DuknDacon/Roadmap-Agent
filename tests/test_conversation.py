@@ -16,6 +16,7 @@ from roadmap_agent.conversation import (
     PREVIOUS_ANNUAL_INCOME_QUESTION,
 )
 from roadmap_agent.domain import Evidence, RiskProfile, RoadmapRequest, RoadmapResult, Scenario
+from roadmap_agent.dynamic_gates import DynamicGate, DynamicGateRegistry
 from roadmap_agent.ports import PolicyBenefit, SavingsProduct
 
 
@@ -615,6 +616,72 @@ def test_external_tool_failures_have_safe_local_fallbacks():
     assert response.status == ConversationStatus.COMPLETED
     assert "공식 근거 문서에서 답을 확인하지 못했습니다" in response.reply
     assert "secret" not in response.reply
+
+
+def test_financial_qa_falls_back_to_gate_hint_for_terms_missing_from_rag():
+    class EmptyRetriever:
+        def search(self, query, limit=3):
+            return []
+
+    class Planner:
+        # 실서비스에서는 "참여기업" 같은 정책 고유 용어는 규칙(classify_intent)이
+        # 못 잡고 ENABLE_GEMINI_PLANNER의 LLM 플래너가 financial_qa로 분류한다.
+        def plan(self, request, message):
+            return ConversationPlan(ConversationIntent.FINANCIAL_QA, ("rag_search",))
+
+    registry = DynamicGateRegistry({
+        "p9": [
+            DynamicGate(
+                policy_id="p9",
+                gate_id="g1",
+                question="참여기업에서 근무한 이력이 없으신가요?",
+                hint="신청일 기준 6개월 내 해당 참여기업 근무 이력이 있는 자는 지원할 수 없습니다.",
+                policy_name="테스트정책",
+            )
+        ]
+    })
+
+    response = execute_conversation(
+        base_request(), base_result(), "참여기업이 뭐야?",
+        run_roadmap_fn=lambda *args, **kwargs: None,
+        policy_repository=Policies(), savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+        planner=Planner(),
+        gate_registry=registry,
+    )
+
+    assert response.intent == ConversationIntent.FINANCIAL_QA
+    assert "테스트정책" in response.reply
+    assert "참여기업" in response.reply
+    assert "공식 정의는 아닐 수 있" in response.reply
+
+
+def test_financial_qa_gate_hint_fallback_is_noop_without_matching_gate():
+    class EmptyRetriever:
+        def search(self, query, limit=3):
+            return []
+
+    registry = DynamicGateRegistry({
+        "p9": [
+            DynamicGate(
+                policy_id="p9", gate_id="g1",
+                question="중소기업 재직 이력이 없으신가요?",
+                hint="중소기업 재직 이력이 있으면 지원할 수 없습니다.",
+                policy_name="무관정책",
+            )
+        ]
+    })
+
+    response = execute_conversation(
+        base_request(), base_result(), "연금저축 세액공제가 뭐야?",
+        run_roadmap_fn=lambda *args, **kwargs: None,
+        policy_repository=Policies(), savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+        gate_registry=registry,
+    )
+
+    assert "공식 근거 문서에서 답을 확인하지 못했습니다" in response.reply
+    assert "무관정책" not in response.reply
 
 
 def test_llm_planner_handles_ambiguous_condition_change_with_whitelisted_tools():

@@ -41,6 +41,7 @@ def _conversation_graph(runtime):
             runtime.explainer,
             runtime.planner,
             runtime.conversation_store,
+            runtime.gate_registry,
         )
     )
     if key not in _CONVERSATION_GRAPHS:
@@ -51,6 +52,7 @@ def _conversation_graph(runtime):
             retriever=runtime.retriever,
             explainer=runtime.explainer,
             planner=runtime.planner,
+            gate_registry=runtime.gate_registry,
             checkpointer=store.checkpointer if store else None,
             session_store=store,
         )

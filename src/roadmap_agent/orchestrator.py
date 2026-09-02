@@ -236,6 +236,7 @@ def run_conversation(
     retriever: RagRetriever | None = None,
     explainer: RoadmapExplainer | None = None,
     planner=None,
+    gate_registry=None,
     context: str = "",
 ):
     """기존 결과를 기준으로 요청에 필요한 도구만 실행하는 대화 진입점."""
@@ -254,6 +255,7 @@ def run_conversation(
         retriever=active_retriever,
         explainer=explainer,
         planner=planner,
+        gate_registry=gate_registry,
         context=context,
     )
 
@@ -265,6 +267,7 @@ def build_conversation_graph(
     retriever: RagRetriever | None = None,
     explainer: RoadmapExplainer | None = None,
     planner=None,
+    gate_registry=None,
     checkpointer=None,
     session_store=None,
 ):
@@ -283,6 +286,7 @@ def build_conversation_graph(
         retriever=retriever or LocalRagRetriever(rag_root or _default_rag_root()),
         explainer=explainer,
         planner=planner,
+        gate_registry=gate_registry,
         checkpointer=checkpointer,
         session_store=session_store,
     )

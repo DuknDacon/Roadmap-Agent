@@ -7,6 +7,7 @@ import time
 from typing import Protocol
 
 from .domain import Evidence, RoadmapRequest, RoadmapResult
+from .dynamic_gates import DynamicGate, DynamicGateRegistry
 from .policy_qualification import effective_household_monthly_income
 from .ports import (
     PolicyRepository,
@@ -598,6 +599,30 @@ def evidence_reply(
     )
 
 
+_FINANCIAL_QA_FAILURE_MARKERS = ("확정할 수 없", "확인하지 못", "확인되지 않", "확인할 수 없")
+
+
+def gate_hint_reply(gates: list[DynamicGate]) -> str:
+    """일반 금융 RAG 코퍼스에는 없는 용어를 개별 정책의 게이트 문구에서 찾았을 때 쓰는 보조 답변.
+
+    게이트 힌트는 해당 정책의 자격조건 설명일 뿐 법령상의 공식 정의가 아니므로
+    그 한계를 함께 안내한다.
+    """
+    lines = []
+    seen_policies: set[str] = set()
+    for gate in gates[:2]:
+        label = gate.policy_name or gate.policy_id
+        if label in seen_policies:
+            continue
+        seen_policies.add(label)
+        lines.append(f"[{label}] {gate.hint or gate.question}")
+    return (
+        "일반 금융 상식 문서에서는 확인되지 않지만, 관련 정책의 자격조건 문구에서는 "
+        "다음과 같이 쓰이고 있습니다. " + " ".join(lines) + " 다만 이는 해당 정책의 "
+        "공고문 자격조건 설명일 뿐 법령상의 공식 정의는 아닐 수 있으니 참고용으로만 확인해 주세요."
+    )
+
+
 def _referenced_scenario(result: RoadmapResult, message: str):
     scenarios = [result.recommended, *result.alternatives]
     named_matches = [
@@ -686,6 +711,7 @@ def execute_conversation(
     retriever: RagRetriever,
     explainer: RoadmapExplainer | None = None,
     planner: ConversationPlanner | None = None,
+    gate_registry: DynamicGateRegistry | None = None,
     context: str = "",
 ) -> ConversationResponse:
     t0 = time.monotonic()
@@ -809,12 +835,22 @@ def execute_conversation(
             evidence = retriever.search(message, limit=3)
         except Exception:
             evidence = []
+        reply = evidence_reply(message, evidence, explainer)
+        # 일반 금융 RAG 코퍼스가 애초에 커버하지 않는 개별 정책 고유 용어
+        # (예: "참여기업")는 RAG가 실패했다는 문구를 반환한다 — 이때만
+        # 이번 대화의 게이트 문구에서 관련 조건 설명을 보조로 찾아본다.
+        if gate_registry is not None and any(
+            marker in reply for marker in _FINANCIAL_QA_FAILURE_MARKERS
+        ):
+            gate_matches = gate_registry.find_gates_mentioning(message)
+            if gate_matches:
+                reply = gate_hint_reply(gate_matches)
         return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,
             updated_policy_request,
             result,
-            evidence_reply(message, evidence, explainer),
+            reply,
             plan.tools,
             evidence=tuple(evidence),
         ))
