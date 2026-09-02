@@ -77,6 +77,28 @@ def test_classifies_supported_intents():
     assert classify_intent("왜 이 상품을 추천했어?") == ConversationIntent.RESULT_EXPLANATION
     assert classify_intent("나는 왜 우대형이 아니야?") == ConversationIntent.POLICY_ELIGIBILITY
     assert classify_intent("연금저축 세액공제가 뭐야?") == ConversationIntent.FINANCIAL_QA
+
+
+def test_fixed_initial_roadmap_request_phrase_is_policy_eligibility_with_or_without_hint_wrapper():
+    """SeedUp이 로드맵 (재)생성 때마다 보내는 고정 문구는 정책/자격 키워드가
+    없어 그대로 두면 UNCLEAR로 떨어진다. "이어서 상담하기"로 이미 완료된
+    thread를 재사용하면 라우터가 "[통합 상담: 첫 요청]" 힌트를 안 붙이고 이
+    문구만 그대로 보내는데, 그때 UNCLEAR로 응답하면 라우터가 로드맵 카드를
+    숨겨버려 "이어서 상담하기"를 눌러도 로드맵이 안 보이는 버그였다
+    (실사용자 피드백으로 발견)."""
+    assert (
+        classify_intent("입력한 조건으로 자산관리 로드맵을 만들어줘.")
+        == ConversationIntent.POLICY_ELIGIBILITY
+    )
+    assert (
+        classify_intent(
+            "[통합 상담: 로드맵 기능 첫 요청입니다. 함께 전달된 프로필의 조건을 "
+            "그대로 사용해 초기 로드맵을 먼저 만들고, 그 결과를 바탕으로 아래 "
+            "사용자 원문에 답해주세요. 되묻기 없이 진행해도 됩니다.]\n\n"
+            "사용자 원문: 입력한 조건으로 자산관리 로드맵을 만들어줘."
+        )
+        == ConversationIntent.POLICY_ELIGIBILITY
+    )
     assert classify_intent("ISA는 왜 비과세야?") == ConversationIntent.FINANCIAL_QA
     assert classify_intent("왜 이 적금을 추천했어?") == ConversationIntent.RESULT_EXPLANATION
     assert classify_intent("적금 시나리오에서도 50만원이 최대 납입금액이야?") == ConversationIntent.RESULT_EXPLANATION

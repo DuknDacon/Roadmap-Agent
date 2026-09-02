@@ -72,6 +72,8 @@ class PolicyEligibilityCard:
     conditions: tuple[str, ...]
 
 
+_INITIAL_ROADMAP_REQUEST = re.compile(r"입력한\s*조건으로\s*자산관리\s*로드맵을\s*만들어줘")
+
 _CHANGE_TERMS = re.compile(
     r"(바꿔|변경|다시\s*계산|늘려|줄여|낮춰|높여|월\s*(?:저축액|투입액|예산)|"
     r"목표\s*(?:금액|액|시점)|비상\s*(?:금|자금)|매달)"
@@ -185,6 +187,18 @@ def classify_intent(
     text = " ".join(message.strip().split())
     if not text:
         return ConversationIntent.UNCLEAR
+    # SeedUp이 로드맵 (재)생성을 요청할 때 항상 보내는 고정 문구. "첫 요청"일
+    # 때는 라우터가 "[통합 상담: ...]" 힌트를 앞에 붙이고, "이어서 상담하기"로
+    # 이미 완료된 thread를 재사용할 때는 힌트 없이 이 문구만 그대로 보낸다.
+    # 둘 다 정책/자격 키워드가 없어 그대로 두면 UNCLEAR로 떨어지는데, 후자의
+    # 경우 라우터가 "이 thread는 이미 로드맵을 받았다"고 기억해 is_first_call
+    # 힌트를 안 붙이므로 사전 체크(게이트)도 건너뛰어 그대로 execute_conversation
+    # 까지 온다 — UNCLEAR 응답은 라우터가 로드맵 카드를 숨겨버려, "이어서
+    # 상담하기"를 누르면 로드맵이 안 보이는 버그였다(실사용자 피드백으로 발견).
+    # 이 고정 문구는 "현재 조건으로 자격/로드맵을 보여달라"는 뜻이 명확하므로
+    # POLICY_ELIGIBILITY로 취급해 게이트 확인 후 카드로 응답한다.
+    if _INITIAL_ROADMAP_REQUEST.search(text):
+        return ConversationIntent.POLICY_ELIGIBILITY
     if _CHANGE_TERMS.search(text) or _INVESTMENT_CHANGE.search(text):
         return ConversationIntent.CONDITION_CHANGE
     if _MISSING_TERMS.search(text):
