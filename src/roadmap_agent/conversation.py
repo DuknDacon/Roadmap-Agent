@@ -712,6 +712,7 @@ def execute_conversation(
     explainer: RoadmapExplainer | None = None,
     planner: ConversationPlanner | None = None,
     gate_registry: DynamicGateRegistry | None = None,
+    answering_missing_fields: bool = False,
     context: str = "",
 ) -> ConversationResponse:
     t0 = time.monotonic()
@@ -735,16 +736,25 @@ def execute_conversation(
         )
         return response
 
-    # UNCLEAR로 분류된 turn이 실제로는 자유텍스트 자격조건 답변이었던 경우
-    # (예: "중소기업 재직 안 해요"는 정책/자격 키워드가 없어 POLICY_ELIGIBILITY로
-    # 안 잡히고 UNCLEAR로 떨어진다) — 이미 apply_policy_answers가 위에서 값을
-    # 성공적으로 파싱해 반영했는데, 이 분기가 무조건 앞서면 "조건을 변경하려는
-    # 것인지..." 같은 일반 안내문만 보여주고 아래 재계산 로직(정책 자격/재계산)
-    # 에는 영영 도달하지 못한다 — 답을 반영해놓고도 사용자에게는 같은 질문이
-    # 반복되는 것처럼 보이는 버그의 핵심 원인. POLICY_ELIGIBILITY가 남은 필드를
-    # 마저 물어보는 정상적인 clarification_question은 그대로 둔다.
+    # UNCLEAR로 분류된 turn이 실제로는 자격조건 답변이었던 경우 — 두 가지
+    # 경로가 있다: (1) 자유텍스트(예: "중소기업 재직 안 해요")는 정책/자격
+    # 키워드가 없어 POLICY_ELIGIBILITY로 안 잡히고 UNCLEAR로 떨어진다.
+    # apply_policy_answers가 위에서 이미 값을 파싱해 policy_changes로 잡힌다.
+    # (2) 동적 게이트(ProfileAskForm의 예/아니오 select) 답변은 프론트가
+    # dynamic_gate_answers로 구조화해서 보내 apply_policy_answers의 정규식
+    # 대상이 아니고, 메시지 원문도 게이트 질문/힌트 문구 그대로라 어떤
+    # 키워드 규칙에도 안 걸린다 — policy_changes가 비어 있어도 라우터가
+    # answering_missing_fields=true로 이 turn이 게이트 답변 제출임을
+    # 명시하면 마찬가지로 건너뛴다. 이 분기가 무조건 앞서면 "조건을
+    # 변경하려는 것인지..." 같은 일반 안내문만 보여주고 이미 반영된 답변에
+    # 맞춰 재계산된 로드맵/정책 자격 요약(아래)에는 영영 도달하지 못한다 —
+    # 답을 반영해놓고도 같은 질문이 반복되는 것처럼 보이고, conversationStatus도
+    # needs_input으로 나가 라우터가 방금 재계산된 로드맵 카드까지 숨겨버리는
+    # 버그의 핵심 원인이었다(실사용자 피드백으로 발견). POLICY_ELIGIBILITY가
+    # 남은 필드를 마저 물어보는 정상적인 clarification_question은 그대로 둔다.
     if plan.clarification_question and not (
-        plan.intent == ConversationIntent.UNCLEAR and policy_changes
+        plan.intent == ConversationIntent.UNCLEAR
+        and (policy_changes or answering_missing_fields)
     ):
         return _finish(ConversationResponse(
             ConversationStatus.NEEDS_INPUT,

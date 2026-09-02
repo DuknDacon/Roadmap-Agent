@@ -237,6 +237,7 @@ def run_conversation(
     explainer: RoadmapExplainer | None = None,
     planner=None,
     gate_registry=None,
+    answering_missing_fields: bool = False,
     context: str = "",
 ):
     """기존 결과를 기준으로 요청에 필요한 도구만 실행하는 대화 진입점."""
@@ -256,6 +257,7 @@ def run_conversation(
         explainer=explainer,
         planner=planner,
         gate_registry=gate_registry,
+        answering_missing_fields=answering_missing_fields,
         context=context,
     )
 

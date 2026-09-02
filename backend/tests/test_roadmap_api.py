@@ -492,6 +492,41 @@ def test_second_call_answering_dynamic_gate_false_builds_roadmap_with_ineligible
     assert response.recommended is not None
 
 
+def test_dynamic_gate_answer_submission_does_not_fall_back_to_generic_clarification():
+    """ProfileAskForm의 동적 게이트 답변은 프론트가 고정 문구로 보내고, 그 안에
+    담긴 실제 답변 문구(게이트 question/hint 그대로)는 apply_policy_answers의
+    정규식(레거시 4개 필드 전용) 어디에도 안 걸린다 — policy_changes가 항상
+    빈 채로 UNCLEAR로 떨어진다. answeringMissingFields 신호가 없으면 이미
+    반영된 답변이 있어도 일반 안내문("조건을 변경하려는 것인지...")만 나오고
+    conversationStatus도 needs_input이 되어, 라우터가 방금 재계산된 로드맵
+    카드를 숨겨버리는 회귀가 있었다(실사용자 피드백으로 발견)."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=DynamicGateGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+        gate_registry=_GATE_REGISTRY,
+    )
+    try:
+        payload = {
+            **PAYLOAD,
+            "dynamicGateAnswers": {"P5:artist_certification": True},
+        }
+        response = roadmap(RoadmapCreateRequest(
+            **payload,
+            question="추가 정보를 반영해서 자산관리 로드맵을 다시 만들어줘. 제공된 정보: 예술활동증명을 받으셨나요?=true",
+            answeringMissingFields=True,
+            threadId=uuid4(),
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.conversation_status == "completed"
+    assert response.conversation_intent == "policy_eligibility"
+    assert response.recommended is not None
+    assert response.chat_reply != "조건을 변경하려는 것인지, 추천 이유나 금융 제도를 묻는 것인지 알려주세요."
+
+
 # ── 사전 체크 게이트가 turn의 의도와 무관하게 무조건 걸리던 버그의 회귀 테스트.
 # 미확인 필드(financial_income_taxed)가 남아있는 상태에서도, 그 필드와 무관한
 # 의도(금융 Q&A/추천 이유 설명/불명확 요청)는 정상 응답해야 하고, 반대로 실제

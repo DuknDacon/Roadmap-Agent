@@ -299,7 +299,8 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         if payload.thread_id is None:
             raise ValueError("대화 요청에는 threadId가 필요합니다.")
         conversation = _conversation_graph(runtime).invoke(
-            str(payload.thread_id), request, result, payload.question
+            str(payload.thread_id), request, result, payload.question,
+            answering_missing_fields=payload.answering_missing_fields,
         )
         request = conversation.request
         result = conversation.result

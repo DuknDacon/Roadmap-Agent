@@ -21,6 +21,7 @@ class ConversationGraphState(TypedDict, total=False):
     message: str
     messages: Annotated[list[str], add]
     response: ConversationResponse
+    answering_missing_fields: bool
 
 
 class RoadmapConversationGraph:
@@ -70,6 +71,7 @@ class RoadmapConversationGraph:
             explainer=self.explainer,
             planner=self.planner,
             gate_registry=self.gate_registry,
+            answering_missing_fields=state.get("answering_missing_fields", False),
             context=context,
         )
         return {
@@ -87,6 +89,7 @@ class RoadmapConversationGraph:
         message: str,
         *,
         now: float | None = None,
+        answering_missing_fields: bool = False,
     ) -> ConversationResponse:
         with self._invoke_lock:
             state = self.app.invoke(
@@ -95,6 +98,7 @@ class RoadmapConversationGraph:
                     "result": result,
                     "message": message,
                     "messages": [message],
+                    "answering_missing_fields": answering_missing_fields,
                 },
                 config={"configurable": {"thread_id": thread_id}},
             )
