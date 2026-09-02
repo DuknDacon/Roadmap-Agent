@@ -511,6 +511,8 @@ class GeminiConversationPlanner:
                 ),
                 response_mime_type="application/json",
                 max_output_tokens=500,
+                temperature=0,
+                seed=0,
             ),
         )
         try:
