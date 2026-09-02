@@ -629,8 +629,8 @@ def test_free_text_field_answer_is_reflected_in_request_patch_and_stops_repeatin
 
     assert second.conversation_status == "completed"
     assert second.request_patch.is_sme_employee is False
-    assert "누락" in second.chat_reply
-    assert "financial_income_taxed" in second.chat_reply
+    assert "확인 필요 항목" in second.chat_reply
+    assert "financial_income_taxed" not in second.chat_reply
 
 
 def test_household_income_answered_by_chat_persists_across_separate_http_requests():
@@ -656,3 +656,64 @@ def test_household_income_answered_by_chat_persists_across_separate_http_request
         service.get_runtime = original_runtime
 
     assert second.request_patch.household_monthly_income == 3_500_000
+
+
+def test_router_initial_generation_message_still_gates_on_missing_fields():
+    """실서비스 회귀 재현: 프론트/라우터는 최초 생성 요청도 question을 비워
+    보내지 않는다 — "입력한 조건으로 자산관리 로드맵을 만들어줘." 같은 고정
+    문구를 보내는데, 이 문구엔 정책 키워드가 전혀 없어 classify_intent가
+    UNCLEAR로 분류한다. isInitialRoadmapRequest 신호가 없으면 이 turn이
+    미확인 자격조건이 남아있는데도 게이트를 건너뛰어버리는 회귀가 있었다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=FinancialIncomeTaxedGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+    )
+    try:
+        response = roadmap(RoadmapCreateRequest(
+            **PAYLOAD,
+            question="입력한 조건으로 자산관리 로드맵을 만들어줘.",
+            isInitialRoadmapRequest=True,
+            threadId=uuid4(),
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert response.recommended is None
+    assert response.conversation_status == "needs_input"
+    assert response.chat_reply == "최근 3년 안에 금융소득종합과세 대상이 된 적이 있나요?"
+
+
+def test_router_followup_after_initial_request_is_not_forced_to_gate():
+    """isInitialRoadmapRequest는 진짜 최초 생성 turn에만 실려온다 — 이후
+    턴(라우터가 is_first_call=False로 넘김)까지 계속 게이트를 강제하면 안
+    된다(그러면 사실상 예전의 '매 turn 무조건 게이트' 버그로 되돌아간다)."""
+    response = roadmap(RoadmapCreateRequest(
+        **PAYLOAD, question="왜 이 상품을 추천했어?", threadId=uuid4(),
+    ))
+    assert response.chat_reply.startswith("현재 최우선안은")
+
+
+def test_eligible_policy_reply_never_leaks_raw_dynamic_gate_keys():
+    """실서비스 회귀 재현: 자유텍스트 답변이 UNCLEAR로 떨어져 정책 자격 요약
+    분기(execute_conversation 맨 아래)에 도달했을 때, missing_qualification_
+    fields의 원본 키("P5:artist_certification" 같은 합성 키)가 사용자 응답에
+    그대로 노출되던 문제. 개수만 안내해야 한다."""
+    original_runtime = service.get_runtime
+    service.get_runtime = lambda: Runtime(
+        policy_repository=DynamicGateGapPolicies(),
+        savings_repository=EmptySavings(),
+        retriever=EmptyRetriever(),
+        gate_registry=_GATE_REGISTRY,
+    )
+    try:
+        response = roadmap(RoadmapCreateRequest(
+            **PAYLOAD, question="중소기업 재직 안 해요", threadId=uuid4(),
+        ))
+    finally:
+        service.get_runtime = original_runtime
+
+    assert "P5:artist_certification" not in response.chat_reply
+    assert "20260" not in response.chat_reply  # 정책 ID 접두사(연월일시분초) 미노출
+    assert "확인 필요 항목 1건" in response.chat_reply

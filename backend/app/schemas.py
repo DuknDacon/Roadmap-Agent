@@ -53,6 +53,11 @@ class RoadmapCreateRequest(ApiModel):
     # classify_intent 상 UNCLEAR로 분류됨) 별도 필드로 받는다 —
     # service.py:_should_check_missing_fields 참고.
     answering_missing_fields: bool = Field(default=False, alias="answeringMissingFields")
+    # 라우터가 이 turn을 "로드맵 첫 생성 요청"으로 보냈는지. question이 실제로는
+    # 라우터가 조합한 고정 문구("입력한 조건으로... 만들어줘")라 classify_intent가
+    # UNCLEAR로 분류하는 경우가 많아, 의도만으로는 이 turn이 최초 생성 요청임을
+    # 알아낼 수 없다 — service.py:_should_check_missing_fields 참고.
+    is_initial_request: bool = Field(default=False, alias="isInitialRoadmapRequest")
 
     @field_validator("target_date")
     @classmethod

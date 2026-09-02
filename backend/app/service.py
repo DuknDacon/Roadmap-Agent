@@ -98,17 +98,25 @@ _PRELAUNCH_FIELD_INPUT_TYPES: dict[str, str] = {
 def _should_check_missing_fields(payload: RoadmapCreateRequest) -> bool:
     """로드맵 계산 전에 미확인 자격조건 필드부터 물어야 하는 turn인지 판단한다.
 
-    이 게이트는 최초 생성 요청(question 없음), 게이트 답변 제출임을 프론트가
-    명시한 turn(answering_missing_fields), 또는 사용자가 실제로 정책 자격을
-    묻는 turn(POLICY_ELIGIBILITY)에만 적용한다. 그 외(추천 이유 설명, 금융
-    Q&A, 조건 변경, 불명확 요청 등)는 로드맵이 미완성이어도 그 자체로 정상
-    응답해야 하는 의도라 게이트를 건너뛴다 — 예전엔 이 turn이 뭐든 상관없이
-    미확인 필드가 하나라도 남아있으면 무조건 그 질문 문구만 돌려줘서, 사용자가
+    이 게이트는 최초 생성 요청(question 없음 또는 라우터가 명시한
+    is_initial_request), 게이트 답변 제출임을 프론트가 명시한 turn
+    (answering_missing_fields), 또는 사용자가 실제로 정책 자격을 묻는 turn
+    (POLICY_ELIGIBILITY)에만 적용한다. 그 외(추천 이유 설명, 금융 Q&A, 조건
+    변경, 불명확 요청 등)는 로드맵이 미완성이어도 그 자체로 정상 응답해야
+    하는 의도라 게이트를 건너뛴다 — 예전엔 이 turn이 뭐든 상관없이 미확인
+    필드가 하나라도 남아있으면 무조건 그 질문 문구만 돌려줘서, 사용자가
     "왜 추천?"이나 순수 금융 지식을 물어도 매번 같은 문구만 반복되는 버그가
     있었다.
+
+    is_initial_request가 필요한 이유: 실제 프론트는 최초 생성 요청도
+    question을 비워 보내지 않는다 — 라우터가 "입력한 조건으로 자산관리
+    로드맵을 만들어줘." 같은 고정 문구를 실어 보내고, 이 문구는 정책 키워드가
+    전혀 없어 classify_intent가 UNCLEAR로 분류한다. question 공백 여부만
+    보면 이 turn을 게이트 없이 통과시켜, 미확인 자격조건이 그대로 남은 채
+    로드맵이 계산·표시되는 회귀가 생긴다.
     """
     question = payload.question.strip()
-    if not question or payload.answering_missing_fields:
+    if not question or payload.answering_missing_fields or payload.is_initial_request:
         return True
     return classify_intent(question) == ConversationIntent.POLICY_ELIGIBILITY
 

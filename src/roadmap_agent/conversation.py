@@ -854,8 +854,12 @@ def execute_conversation(
                 "preferential": "우대형",
                 "preferential_possible": "우대형 가능성",
             }.get(item.benefit_tier, item.benefit_tier)
+            # item.missing_qualification_fields는 "policy_id:gate_id" 같은 내부
+            # 합성 키나 snake_case 필드명이라 그대로 이어붙이면 사용자에게 원본
+            # 식별자가 그대로 노출된다(예: "20260625005400113245:no_business_
+            # registration") — 사람이 읽을 문구가 아니라 개수만 안내한다.
             missing = (
-                ", 누락: " + ", ".join(item.missing_qualification_fields)
+                f", 확인 필요 항목 {len(item.missing_qualification_fields)}건"
                 if item.missing_qualification_fields else ""
             )
             details.append(
