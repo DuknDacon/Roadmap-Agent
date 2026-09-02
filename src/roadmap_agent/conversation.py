@@ -913,7 +913,14 @@ def execute_conversation(
         reply = "현재 입력과 조회 결과로 자격이 확인된 정책상품이 없습니다. 탈락 사유와 모집상태를 공식 공고에서 다시 확인해 주세요."
     return _finish(ConversationResponse(
         ConversationStatus.COMPLETED,
-        plan.intent,
+        # plan.intent를 그대로 쓰지 않는다 — 이 분기는 UNCLEAR로 분류된 turn이
+        # 실제로는 자유텍스트 자격조건 답변이었던 경우(위 720번째 줄 예외)도
+        # 타는데, 그때도 plan.intent는 여전히 "unclear"다. 이 분기가 실제로
+        # 만드는 건 정책 자격 요약이니 policy_eligibility로 보고해야, 라우터의
+        # "financial_qa/unclear는 로드맵 카드 억제" 로직이 방금 막 재계산된
+        # 로드맵 카드까지 같이 숨겨버리는 일이 없다(실사용자 피드백으로 발견 —
+        # 게이트 답변 제출 후 오른쪽 로드맵 패널이 사라지는 버그의 원인).
+        ConversationIntent.POLICY_ELIGIBILITY,
         updated_policy_request,
         result,
         reply,

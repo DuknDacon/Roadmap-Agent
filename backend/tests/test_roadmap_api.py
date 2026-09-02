@@ -631,6 +631,11 @@ def test_free_text_field_answer_is_reflected_in_request_patch_and_stops_repeatin
     assert second.request_patch.is_sme_employee is False
     assert "확인 필요 항목" in second.chat_reply
     assert "financial_income_taxed" not in second.chat_reply
+    # 규칙 분류기는 이 turn을 UNCLEAR로 떨어뜨리지만, 실제로 만든 응답은
+    # 정책 자격 요약이다 — conversationIntent를 UNCLEAR 그대로 보고하면
+    # 라우터의 "financial_qa/unclear는 로드맵 카드 억제" 로직이 방금 막
+    # 반영된 로드맵 카드까지 같이 숨겨버린다(실사용자 피드백으로 발견한 회귀).
+    assert second.conversation_intent == "policy_eligibility"
 
 
 def test_household_income_answered_by_chat_persists_across_separate_http_requests():

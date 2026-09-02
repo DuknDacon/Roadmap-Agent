@@ -88,6 +88,24 @@ class DynamicGateRegistryTest(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].gate_id, "no_recent_company_employment")
 
+    def test_find_gates_mentioning_ignores_generic_kinship_terms(self):
+        """"직계존비속"은 민법상 정의가 이미 잘 알려진 일반 친족 용어라, 이
+        정책의 배제조건 문구에 같이 등장한다는 이유만으로 게이트 힌트를
+        답으로 보여주면 안 된다(실사용자 피드백으로 발견한 회귀)."""
+        registry = DynamicGateRegistry({
+            "P1": [
+                DynamicGate(
+                    policy_id="P1", gate_id="g1",
+                    question="배우자, 직계존비속 또는 형제자매가 참여기업 사업주가 아니신가요?",
+                    hint="배우자, 직계존비속 또는 형제자매가 참여기업 사업주인 자는 제외됩니다.",
+                    policy_name="테스트정책",
+                )
+            ]
+        })
+        self.assertEqual(registry.find_gates_mentioning("직계존비속이 뭐야?"), [])
+        # "참여기업"처럼 이 정책 고유의 조어는 여전히 매칭돼야 한다.
+        self.assertEqual(len(registry.find_gates_mentioning("참여기업이 뭐야?")), 1)
+
     def test_find_gates_mentioning_returns_empty_when_no_term_matches(self):
         registry = DynamicGateRegistry({
             "P1": [
