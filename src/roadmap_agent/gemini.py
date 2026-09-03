@@ -469,6 +469,49 @@ class GeminiRoadmapExplainer:
         self._web_search_cache[question] = final
         return final
 
+    def answer_general_definition(self, question: str) -> str | None:
+        """RAG 금융 코퍼스에도, 정책 게이트 문구에도 없는 일반 상식·법률·행정
+        용어 정의 질문(예: "직계존비속이 뭐야?")에 웹검색으로 답한다.
+
+        _answer_with_google_search와 달리 공식 도메인(law.go.kr 등)으로
+        출처를 제한하지 않는다 — 재무 자문이 아니라 사전적 정의라 신뢰도
+        리스크가 낮은데, 그 제한 때문에 이런 질문엔 항상 "확정할 수 없다"고만
+        답하던 문제가 있었다(실사용자 피드백 + 서버 로그로 확인). None을
+        반환하면 호출부가 기존 실패 문구를 그대로 쓴다.
+        """
+        if not self.web_search_enabled:
+            return None
+        from google.genai import types
+
+        cached = self._web_search_cache.get(question)
+        if cached:
+            return cached
+        if not self._try_consume_web_search_quota():
+            return None
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=question,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    system_instruction=(
+                        "일반 상식·법률·행정 용어의 정의를 묻는 질문에 한국어로 "
+                        "간결하게(1~2문장) 답한다. 확인되지 않는 내용은 추측하지 "
+                        "않는다. 재무 자문이 아니라 사전적 정의를 알려주는 것이므로 "
+                        "특정 도메인으로 출처를 제한하지 않되, 검색 결과를 바탕으로 "
+                        "답한다."
+                    ),
+                    max_output_tokens=300,
+                ),
+            )
+        except Exception:
+            return None
+        answer = (response.text or "").strip()
+        if not answer:
+            return None
+        self._web_search_cache[question] = answer
+        return answer
+
 
 class GeminiConversationPlanner:
     """규칙으로 해석하지 못한 대화를 제한된 실행 계획 JSON으로 변환한다."""
