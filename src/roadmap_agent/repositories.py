@@ -177,7 +177,9 @@ def _apply_dynamic_gates(
         if answer is None:
             missing_fields.append(composite)
             pending += 1
-        elif answer is False:
+        # question이 이제 긍정형 직접 질문이라("~인가요?"), 어느 답이
+        # 탈락인지는 문장 방향이 아니라 gate.disqualify_on_yes로 정해진다.
+        elif answer is gate.disqualify_on_yes:
             eligible = False
             reasons.append(f"{gate.question} — 미충족")
             # 이 게이트에서 이미 탈락이 확정됐다 — 같은 상품에 게이트가 더

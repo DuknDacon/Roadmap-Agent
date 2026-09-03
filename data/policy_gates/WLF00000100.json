@@ -12,7 +12,10 @@
       "gate_id": "working_status",
       "question": "가구원 중 현재 근로활동을 하고 계신 분이 있으신가요?",
       "hint": "신청 당시 일하는 사람이 있어야 합니다.",
-      "source_excerpt": "가구원 중 일하는 사람이 있어야 하며"
+      "source_excerpt": "가구원 중 일하는 사람이 있어야 하며",
+      "disqualify_on_yes": false,
+      "yes_label": "예, 가구원 중 현재 근로활동을 하고 있는 분이 있습니다.",
+      "no_label": "아니요, 근로활동을 하고 있는 가구원이 없습니다."
     }
   ]
 }

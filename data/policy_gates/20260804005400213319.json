@@ -12,7 +12,10 @@
       "gate_id": "is_youth_group_or_club",
       "question": "청년 모임 또는 동아리에 해당하시나요?",
       "hint": "청년 개인뿐만 아니라 청년 모임 및 동아리도 신청할 수 있습니다.",
-      "source_excerpt": "19~39세 청년, 청년 모임 및 동아리"
+      "source_excerpt": "19~39세 청년, 청년 모임 및 동아리",
+      "disqualify_on_yes": false,
+      "yes_label": "예, 청년 모임 또는 동아리에 해당합니다.",
+      "no_label": "아니요, 해당하지 않습니다."
     }
   ]
 }

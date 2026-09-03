@@ -10,9 +10,12 @@
   "gates": [
     {
       "gate_id": "not_university_student",
-      "question": "현재 대학생 신분이 아니십니까?",
+      "question": "현재 대학생 신분이신가요?",
       "hint": "대학생은 본 사업에 참여할 수 없습니다.",
-      "source_excerpt": "대학생 참여 불가"
+      "source_excerpt": "대학생 참여 불가",
+      "disqualify_on_yes": true,
+      "yes_label": "예, 현재 대학생 신분입니다.",
+      "no_label": "아니요, 대학생이 아닙니다."
     }
   ]
 }

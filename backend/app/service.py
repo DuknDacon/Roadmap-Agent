@@ -175,6 +175,8 @@ def _missing_field_details(missing_fields: list[str], runtime) -> list[MissingFi
                         question=gate.question,
                         hint=gate.hint or None,
                         inputType="boolean",
+                        yesLabel=gate.yes_label or None,
+                        noLabel=gate.no_label or None,
                     )
                 )
     return details

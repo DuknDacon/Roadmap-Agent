@@ -42,6 +42,18 @@ class DynamicGate:
     LLM은 이 질문(question)만 만든다 — eligible 판정은 항상
     repositories.py의 결정론적 코드가 request.dynamic_gate_answers 를
     보고 계산한다.
+
+    question은 이제 이중부정 없는 긍정형 직접 질문("~인가요?")으로 쓴다
+    (예전엔 "아니오"가 항상 탈락을 뜻하도록 배제조건을 부정 의문문으로
+    뒤집어 만들게 했는데, "~아니신가요?"에 "아니요"로 답하는 식의 이중부정이
+    실사용자에게 헷갈린다는 피드백으로 폐기). 그래서 어느 답이 탈락인지를
+    문장 방향만으로 추론할 수 없어 disqualify_on_yes로 명시한다.
+
+    yes_label/no_label은 프론트가 예/아니오 선택지에 "예/아니요"만 보여주는
+    대신 그 질문의 주어까지 포함한 완전한 문장으로 보여주기 위한 것 —
+    예: question="배우자가 사업주인가요?"의 yes_label은
+    "예, 배우자가 사업주입니다." 같은 형태. 문장 변형은 조사 처리가
+    까다로워 자동 생성하지 않고 추출 시점에 LLM이 같이 만든다(검수 대상).
     """
 
     policy_id: str
@@ -49,6 +61,12 @@ class DynamicGate:
     question: str
     hint: str
     policy_name: str = ""
+    # True면 "예" 답변이 탈락 사유, False(기본값)면 "아니요" 답변이 탈락
+    # 사유다. 기본값 False는 이 필드가 없던 예전 검수 데이터(모두 부정
+    # 의문문 방식)와 호환된다.
+    disqualify_on_yes: bool = False
+    yes_label: str = ""
+    no_label: str = ""
 
 
 class DynamicGateRegistry:
@@ -80,6 +98,9 @@ class DynamicGateRegistry:
                     question=str(item["question"]),
                     hint=str(item.get("hint") or ""),
                     policy_name=policy_name,
+                    disqualify_on_yes=bool(item.get("disqualify_on_yes", False)),
+                    yes_label=str(item.get("yes_label") or ""),
+                    no_label=str(item.get("no_label") or ""),
                 )
                 for item in payload.get("gates", [])
             ]

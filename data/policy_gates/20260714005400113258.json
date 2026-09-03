@@ -10,39 +10,57 @@
   "gates": [
     {
       "gate_id": "not_employed_employment_insurance",
-      "question": "현재 고용보험에 가입되어 있지 않으신가요?",
+      "question": "현재 고용보험에 가입되어 있으신가요?",
       "hint": "참여 신청일 현재 고용보험에 가입되어 있지 않아야 합니다.",
-      "source_excerpt": "참여 신청일 현재 고용보험에 가입되어 있지 않은 사람"
+      "source_excerpt": "참여 신청일 현재 고용보험에 가입되어 있지 않은 사람",
+      "disqualify_on_yes": true,
+      "yes_label": "예, 현재 고용보험에 가입되어 있습니다.",
+      "no_label": "아니요, 고용보험에 가입되어 있지 않습니다."
     },
     {
       "gate_id": "not_currently_employed_or_business",
-      "question": "현재 취업 중이 아니거나 사업자등록이 되어 있지 않으신가요?",
+      "question": "현재 취업 중이거나 사업자등록이 되어 있으신가요?",
       "hint": "취업 중이거나 사업자등록 중인 사람은 참여가 제한됩니다.",
-      "source_excerpt": "취업 중이거나 사업자등록 중인 사람"
+      "source_excerpt": "취업 중이거나 사업자등록 중인 사람",
+      "disqualify_on_yes": true,
+      "yes_label": "예, 현재 취업 중이거나 사업자등록이 되어 있습니다.",
+      "no_label": "아니요, 취업 중이지도 않고 사업자등록도 되어 있지 않습니다."
     },
     {
       "gate_id": "not_enrolled_in_school",
-      "question": "고등학교 또는 대학(원) 재학생이 아니신가요?",
+      "question": "고등학교 또는 대학(원) 재학생이신가요?",
       "hint": "초·중등교육법상 고등학교 및 고등교육법상 대학(원) 재학생은 참여가 제한됩니다.",
-      "source_excerpt": "「초·중등교육법」에 다른 고등학교 및 「고등교육법」에 따른 대학(원) 재학생"
+      "source_excerpt": "「초·중등교육법」에 다른 고등학교 및 「고등교육법」에 따른 대학(원) 재학생",
+      "disqualify_on_yes": true,
+      "yes_label": "예, 고등학교 또는 대학(원) 재학생입니다.",
+      "no_label": "아니요, 재학생이 아닙니다."
     },
     {
       "gate_id": "job_seeking_registered",
       "question": "직업안정법에 따른 직업안정기관에 구직등록을 하셨나요?",
       "hint": "직업안정기관에 구직등록을 한 사람만 참여할 수 있습니다.",
-      "source_excerpt": "「직업안정법」에 다른 직업안정기관에 구직등록을 하지 않은 사람"
+      "source_excerpt": "「직업안정법」에 다른 직업안정기관에 구직등록을 하지 않은 사람",
+      "disqualify_on_yes": false,
+      "yes_label": "예, 직업안정기관에 구직등록을 했습니다.",
+      "no_label": "아니요, 구직등록을 하지 않았습니다."
     },
     {
       "gate_id": "not_in_other_vocational_training",
-      "question": "국가나 지방자치단체가 실시하거나 비용을 지원하는 다른 직업능력개발훈련을 수강하고 있지 않으신가요?",
+      "question": "국가나 지방자치단체가 실시하거나 비용을 지원하는 다른 직업능력개발훈련을 수강하고 계신가요?",
       "hint": "타 직업능력개발훈련을 수강 중인 사람은 참여가 제한됩니다.",
-      "source_excerpt": "국가 또는 지방자치단체가 실시하거나 비용을 지원하는 직업능력개발훈련을 수강하고 있는 사람"
+      "source_excerpt": "국가 또는 지방자치단체가 실시하거나 비용을 지원하는 직업능력개발훈련을 수강하고 있는 사람",
+      "disqualify_on_yes": true,
+      "yes_label": "예, 국가나 지방자치단체가 실시하거나 비용을 지원하는 다른 직업능력개발훈련을 수강하고 있습니다.",
+      "no_label": "아니요, 수강하고 있지 않습니다."
     },
     {
       "gate_id": "korean_citizen",
       "question": "대한민국 국적을 보유하고 계신가요?",
       "hint": "대한민국 국적을 보유한 사람만 참여할 수 있습니다.",
-      "source_excerpt": "대한민국 국적을 보유하지 않은 사람"
+      "source_excerpt": "대한민국 국적을 보유하지 않은 사람",
+      "disqualify_on_yes": false,
+      "yes_label": "예, 대한민국 국적을 보유하고 있습니다.",
+      "no_label": "아니요, 대한민국 국적을 보유하고 있지 않습니다."
     }
   ]
 }

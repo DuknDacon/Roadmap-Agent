@@ -10,9 +10,12 @@
   "gates": [
     {
       "gate_id": "not_health_insurance_employee_or_business_owner",
-      "question": "건강보험 직장가입자 또는 개인사업자가 아니십니까?",
+      "question": "건강보험 직장가입자 또는 개인사업자에 해당하시나요?",
       "hint": "건강보험 직장가입자 및 개인사업자는 지원 대상에서 제외됩니다.",
-      "source_excerpt": "건강보험 직장가입자 및 개인사업자는 제외"
+      "source_excerpt": "건강보험 직장가입자 및 개인사업자는 제외",
+      "disqualify_on_yes": true,
+      "yes_label": "예, 건강보험 직장가입자 또는 개인사업자에 해당합니다.",
+      "no_label": "아니요, 해당하지 않습니다."
     }
   ]
 }

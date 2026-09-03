@@ -109,6 +109,11 @@ class MissingFieldDetail(ApiModel):
     question: str
     hint: str | None = None
     input_type: str = Field(default="boolean", alias="inputType")
+    # boolean 질문의 예/아니오 선택지에 "예/아니요"만 보여주는 대신, 그
+    # 질문의 주어까지 포함한 완전한 문장을 보여주기 위한 라벨(동적 게이트만
+    # 채워서 내려준다 — 레거시 4개 필드는 None으로 프론트 기본 문구를 쓴다).
+    yes_label: str | None = Field(default=None, alias="yesLabel")
+    no_label: str | None = Field(default=None, alias="noLabel")
 
 
 class PolicyEligibilityCard(ApiModel):
