@@ -7,7 +7,7 @@ import time
 from typing import Protocol
 
 from .domain import Evidence, RoadmapRequest, RoadmapResult
-from .dynamic_gates import DynamicGate, DynamicGateRegistry
+from .dynamic_gates import DynamicGate, DynamicGateRegistry, general_term_definition
 from .policy_qualification import effective_household_monthly_income
 from .ports import (
     PolicyRepository,
@@ -887,6 +887,17 @@ def execute_conversation(
             plan.tools,
         ))
     if plan.intent == ConversationIntent.FINANCIAL_QA:
+        # RAG/웹검색보다 먼저 확인한다 — "직계존비속이 뭐야?" 같은 일반
+        # 친족·법률·행정 용어는 금융 RAG 코퍼스에 없어 관련 없는 문서만
+        # 걸리고, 그 뒤 웹검색도 인용 허용 도메인 필터에 걸려 "확정할 수
+        # 없다"로 떨어지는 문제가 있었다(실사용자 피드백). 이 용어들은
+        # 검색 없이 확정된 정의로 바로 답한다.
+        general_definition = general_term_definition(message)
+        if general_definition is not None:
+            return _finish(ConversationResponse(
+                ConversationStatus.COMPLETED, plan.intent, updated_policy_request, result,
+                general_definition, plan.tools,
+            ))
         try:
             evidence = retriever.search(message, limit=3)
         except Exception:
