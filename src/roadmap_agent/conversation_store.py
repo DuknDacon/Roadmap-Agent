@@ -11,7 +11,7 @@ from . import conversation as conversation_module
 from . import domain as domain_module
 
 
-DEFAULT_TTL_SECONDS = 30 * 60
+DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60  # 30일 — 해커톤 제출 기간 동안 실사용 여부 확인용(2026-09-03)
 
 # 대화 그래프 상태에 실리는 우리 쪽 데이터클래스·Enum들. LangGraph의 msgpack
 # 직렬화기는 기본적으로 모르는 타입을 관대하게 저장해주지만, 이후 버전에서는

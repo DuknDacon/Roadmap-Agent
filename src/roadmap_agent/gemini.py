@@ -225,6 +225,9 @@ class GeminiPolicyGateExtractor:
         ]
 
 
+_WEB_SEARCH_CACHE_MAX = 500
+
+
 class GeminiRoadmapExplainer:
     """결정론적 결과를 변경하지 않고 사용자용 설명만 생성한다."""
 
@@ -255,7 +258,17 @@ class GeminiRoadmapExplainer:
         self._usage_db_path = usage_db_path or os.getenv("SHARED_DB_PATH")
         self._web_search_month = date.today().strftime("%Y-%m")
         self._web_search_count = 0
+        # 질문 문구를 키로 쓰는 캐시라 프로세스가 오래 떠 있을수록(대화 이력
+        # TTL을 늘리면서 재배포 주기도 길어질 수 있음) 트래픽에 비례해 계속
+        # 커진다 — 이미 메모리가 빠듯한 서버(RAM 954MB)에서 무한정 늘어나면
+        # 위험하니 상한을 두고 오래된 항목부터 밀어낸다.
         self._web_search_cache: dict[str, str] = {}
+
+    def _cache_web_search_answer(self, question: str, answer: str) -> None:
+        self._web_search_cache[question] = answer
+        while len(self._web_search_cache) > _WEB_SEARCH_CACHE_MAX:
+            oldest_key = next(iter(self._web_search_cache))
+            del self._web_search_cache[oldest_key]
 
     def _try_consume_web_search_quota(self) -> bool:
         """이번 달 웹 검색 한도가 남아 있으면 원자적으로 1회 소비하고 True를 반환한다."""
@@ -466,7 +479,7 @@ class GeminiRoadmapExplainer:
                 )
             return "공식 웹 출처에서 질문을 확인할 근거를 찾지 못했습니다. 최신 상품 약관이나 운영기관에 확인해 주세요."
         final = answer + "\n\n공식 출처: " + " · ".join(sources[:3])
-        self._web_search_cache[question] = final
+        self._cache_web_search_answer(question, final)
         return final
 
     def answer_general_definition(self, question: str) -> str | None:
@@ -509,7 +522,7 @@ class GeminiRoadmapExplainer:
         answer = (response.text or "").strip()
         if not answer:
             return None
-        self._web_search_cache[question] = answer
+        self._cache_web_search_answer(question, answer)
         return answer
 
 
