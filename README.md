@@ -39,13 +39,14 @@ Roadmap-Agent/
 | `calculators.py` | 결정론적 계산 함수 |
 | `agents.py` | 품목별 시나리오 노드 |
 | `repositories.py` | 공용 SQLite 적금·정책 Repository, 실제 API 필드 매핑 |
+| `dynamic_gates.py` | 4개 하드코딩 필드를 넘어서는 상품별 동적 자격조건 게이트(예/아니오) 스키마·검증 완료 데이터 로더 — `repositories.py`가 판정에 사용 |
 | `policy_qualification.py` | 기준 중위소득 계산 |
 | `policy_rules.py` | 검증된 JSON 규칙 기반 자격판정 엔진 (현재 프로덕션 미연결) |
 | `retrieval.py` | FAISS·BM25 하이브리드 RAG와 로컬 폴백 검색 |
 | `rag_chunking.py` | 헤딩·법령 조항 경계 보존 청커 |
 | `conversation.py` | Agentic 대화 의도 분류·도구 실행 |
 | `conversation_graph.py` | LangGraph 대화 스레드 상태 |
-| `conversation_store.py` | 대화 세션 SQLite 저장소 (TTL 지나면 자동 삭제) |
+| `conversation_store.py` | 대화 세션 SQLite 저장소 (TTL 지나면 자동 삭제 — 현재 30일, `CONVERSATION_TTL_SECONDS`로 재정의 가능) |
 | `ui_state.py` | 대화 중 조건 변경을 요청 객체에 반영 (`conversation.py`가 사용) |
 | `ports.py` | Repository·Retriever·Explainer 인터페이스(Protocol) 정의 |
 | `region_codes.py` | 법정동 코드 옵션 로드·검색 |
@@ -60,7 +61,7 @@ Roadmap-Agent/
 |---|---|
 | `rag/` | ISA·연금·정책 공식 RAG 원문 |
 | `rag_index/` | FAISS 인덱스 + 청크 (Docker 이미지에 포함) |
-| `shared/` | 공용 SQLite 파일(`seedup.sqlite`) — git-ignored, 로컬/서버마다 별도 |
+| `shared/` | 참조 데이터(`seedup_data.sqlite`)·대화 이력(`conversations.sqlite`) SQLite 파일 — git-ignored, 로컬/서버마다 별도 |
 | `source_docs/` | 수집 원문·API 가이드 |
 
 ## 로컬 실행
@@ -151,18 +152,24 @@ Gemini는 계산 결과를 수정하지 않고 `explanation`만 생성합니다.
 
 ## 공용 SQLite
 
-`.env`의 `SHARED_DB_PATH`에 기능 1·2가 함께 참조할 SQLite 파일 경로를 지정합니다.
-초기 스키마 계약은 `db/sqlite_schema.sql`입니다.
+`.env`의 `SHARED_DB_PATH`에 기능 1·2가 함께 참조할 참조 데이터 SQLite 파일 경로를
+지정합니다. 초기 스키마 계약은 `db/sqlite_schema.sql`입니다.
 
 ```bash
 mkdir -p data/shared
-sqlite3 data/shared/seedup.sqlite < db/sqlite_schema.sql
+sqlite3 data/shared/seedup_data.sqlite < db/sqlite_schema.sql
 ```
 
 테이블은 `finlife_saving_base`, `finlife_saving_option`, `youth_policy`,
 `welfare_service`처럼 최상위에 둡니다. 성필님 제공 DB도 이 컬럼 계약을
-따르는 SQLite 파일이면 별도 코드 변경 없이 교체할 수 있습니다. 기능 2의 LangGraph
-체크포인트와 세션 테이블도 같은 파일에 생성되며 WAL과 30초 busy timeout을 사용합니다.
+따르는 SQLite 파일이면 별도 코드 변경 없이 교체할 수 있습니다.
+
+기능 2의 LangGraph 체크포인트·대화 세션은 `CONVERSATION_STORE_PATH`(배포 시
+`conversations.sqlite`로 별도 지정)로 **참조 데이터 파일과 분리**돼 있습니다 —
+성필님이 참조 데이터를 갱신할 때마다 대화 이력까지 함께 지워야 하는 문제를
+없애기 위함입니다. 이 파일은 WAL과 30초 busy timeout을 쓰며, 스레드별로 마지막
+활동 후 `CONVERSATION_TTL_SECONDS`(기본 30일 — 원래 30분이었으나 해커톤 제출
+기간 동안 실사용 확인을 위해 2026-09-03 연장)가 지나면 자동 삭제됩니다.
 
 수집한 세 fixture를 이 컬럼 계약에 맞춰 UPSERT합니다. (성필님 제공 DB도 같은
 계약을 따르는 SQLite 파일로 받습니다 — Postgres 등 별도 DB 서버는 쓰지 않습니다.)

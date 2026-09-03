@@ -44,13 +44,19 @@ Keep both flags disabled during ordinary local UI development to avoid external 
 
 ## Conversation session storage
 
-Conversation state (LangGraph checkpoints keyed by `threadId`) is stored in the shared SQLite
-file so a session survives backend restarts, including `uvicorn --reload` picking up a code
-change mid-test. Each thread is deleted automatically once it has been idle past its TTL — no
-chat content is kept permanently.
+Conversation state (LangGraph checkpoints keyed by `threadId`) is stored in a SQLite file so a
+session survives backend restarts, including `uvicorn --reload` picking up a code change
+mid-test. In deployment this is a **separate file from the shared reference-data DB** (see
+"공용 SQLite" in `../README.md`) — refreshing the reference data no longer wipes conversation
+history. Each thread is deleted automatically once it has been idle past its TTL — no chat
+content is kept permanently.
 
-- `CONVERSATION_STORE_PATH` (default: `SHARED_DB_PATH`): file location.
-- `CONVERSATION_TTL_SECONDS` (default: `1800`, 30 minutes): idle time before a thread's state is deleted.
+- `CONVERSATION_STORE_PATH` (default: falls back to `SHARED_DB_PATH`, or a local
+  `.data/conversations.sqlite` if that's unset too): file location. Deployment always sets this
+  explicitly to its own file.
+- `CONVERSATION_TTL_SECONDS` (default: `2592000`, 30 days as of 2026-09-03 — was `1800`/30
+  minutes before that; extended for the hackathon submission window so usage can be reviewed):
+  idle time before a thread's state is deleted.
 
 The file (and its `-wal`/`-shm` companions) is git-ignored and safe to delete at any time —
 doing so just resets every active conversation.
