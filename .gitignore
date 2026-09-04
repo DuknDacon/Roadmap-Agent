@@ -20,3 +20,8 @@ backend/app/.data/
 *.sqlite-wal
 *.sqlite-shm
 .mcp.json
+
+# 공용 DB 마운트 지점 — 서버는 /srv/seedup/shared 를 쓰고 이미지에도 들어가지
+# 않는다. 로컬에서 컨테이너를 띄우면 Docker가 여기에 파일을 만들 뿐이라
+# 저장소에 올리지 않는다(DB 백업 파일이 커밋돼 checkout이 막힌 적 있음).
+data/shared/
