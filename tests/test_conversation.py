@@ -366,6 +366,18 @@ def test_condition_change_recalculates_with_selected_tools_only():
     assert len(calls) == 1
 
 
+def test_emergency_fund_concept_question_is_financial_qa_not_condition_change():
+    """'비상자금은 왜 필요해?' 는 조건 변경이 아니라 개념 질문이다.
+
+    _CHANGE_TERMS 가 '비상자금'을 값 없이도 잡아 condition_change 로 분류하는
+    바람에, 질문에 답하지 않고 로드맵 재계산 결과만 나가던 문제(프로덕션에서
+    확인). 값이 붙은 조건 답변("비상금 없어")은 그대로 조건 변경이어야 한다.
+    """
+    assert classify_intent("비상자금은 왜 필요해?") == ConversationIntent.FINANCIAL_QA
+    assert classify_intent("비상금 없어") == ConversationIntent.CONDITION_CHANGE
+    assert classify_intent("비상자금 보유하고 있어") == ConversationIntent.CONDITION_CHANGE
+
+
 def test_condition_term_without_value_answers_instead_of_failing():
     """'매달 얼마씩...' 처럼 조건 용어만 있고 바꿀 값이 없는 질문.
 
