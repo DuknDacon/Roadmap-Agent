@@ -160,6 +160,10 @@ class RoadmapResponse(ApiModel):
     suggested_replies: list[str] = Field(
         default_factory=list, alias="suggestedReplies"
     )
+    # 이번 turn의 답변이 근거로 삼은 공식 문서. 금융 Q&A(financial_qa)처럼
+    # 로드맵 카드 없이 문장만 나가는 turn은 여기가 유일한 출처 전달 통로다 —
+    # 시나리오별 근거(ScenarioResponse.evidence)와 달리 대화 단위로 붙는다.
+    sources: list[EvidenceItem] = Field(default_factory=list)
 
 
 class RoadmapRequestPatch(ApiModel):

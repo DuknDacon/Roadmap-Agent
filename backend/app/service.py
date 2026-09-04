@@ -300,6 +300,7 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
     request_patch = None
     policy_eligibility_cards: list[PolicyEligibilityCard] = []
     suggested_replies: list[str] = []
+    conversation_sources: list[EvidenceItem] = []
     if payload.question.strip():
         if payload.thread_id is None:
             raise ValueError("대화 요청에는 threadId가 필요합니다.")
@@ -324,6 +325,17 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
             for card in conversation.policy_eligibility_cards
         ]
         suggested_replies = list(conversation.suggested_replies)
+        # 금융 Q&A처럼 로드맵 카드 없이 문장만 나가는 turn의 근거 문서. 예전엔
+        # conversation.evidence가 여기서 버려져, RAG로 근거를 찾아 답해놓고도
+        # 화면에는 출처가 하나도 안 붙었다(기능명세서의 "근거 인용"과 불일치).
+        conversation_sources = [
+            EvidenceItem(
+                title=item.title,
+                organization="공식 제공기관",
+                url=item.source_url,
+            )
+            for item in conversation.evidence
+        ]
         request_patch = RoadmapRequestPatch(
             monthlyBudget=request.monthly_budget,
             targetDate=_target_date(request.horizon_months, today),
@@ -375,4 +387,5 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         requestPatch=request_patch,
         policyEligibilityCards=policy_eligibility_cards,
         suggestedReplies=suggested_replies,
+        sources=conversation_sources,
     )
