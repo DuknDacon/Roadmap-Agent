@@ -299,6 +299,7 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
     conversation_intent = None
     request_patch = None
     policy_eligibility_cards: list[PolicyEligibilityCard] = []
+    suggested_replies: list[str] = []
     if payload.question.strip():
         if payload.thread_id is None:
             raise ValueError("대화 요청에는 threadId가 필요합니다.")
@@ -322,6 +323,7 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
             )
             for card in conversation.policy_eligibility_cards
         ]
+        suggested_replies = list(conversation.suggested_replies)
         request_patch = RoadmapRequestPatch(
             monthlyBudget=request.monthly_budget,
             targetDate=_target_date(request.horizon_months, today),
@@ -372,4 +374,5 @@ def create_roadmap(payload: RoadmapCreateRequest) -> RoadmapResponse:
         conversationIntent=conversation_intent,
         requestPatch=request_patch,
         policyEligibilityCards=policy_eligibility_cards,
+        suggestedReplies=suggested_replies,
     )

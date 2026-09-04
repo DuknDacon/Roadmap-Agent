@@ -60,6 +60,10 @@ class ConversationResponse:
     # 담고, 조건별 세부 내용은 여기서만 나온다(실사용자 피드백: 문장
     # 나열형 답변이 가독성이 나쁘다는 지적으로 이 필드를 추가).
     policy_eligibility_cards: tuple["PolicyEligibilityCard", ...] = ()
+    # 프론트가 클릭 가능한 chip으로 렌더하는 제안 문구. 클릭하면 그 문장이
+    # 그대로 다음 turn으로 전송되므로, 반드시 의도한 intent로 분류되는
+    # 문장이어야 한다(_offer_unapplied_condition 참고).
+    suggested_replies: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,41 @@ class PolicyEligibilityCard:
     availability: str
     qualification_status: str
     conditions: tuple[str, ...]
+
+
+def _offer_unapplied_condition(
+    response: ConversationResponse, message: str
+) -> ConversationResponse:
+    """말한 조건이 이번 turn에 반영되지 않았으면, 반영할지 되묻는 안내를 덧붙인다.
+
+    "월 70만원 만기 5년 기준으로 정부 기여금 얼마나 붙어?"처럼 조건 값이 섞인
+    질문은 '정부 기여금'이 _POLICY_TERMS에 먼저 걸려 policy_eligibility로 가고,
+    _CHANGE_TERMS에는 맨 '월'이 없어 condition_change로 잡히지 않는다. 그래서
+    월 저축액이 반영되지 않는데도 아무 안내가 없었고, 라우터 LLM이 "로드맵에
+    반영했습니다"라고 잘못 요약하는 동안 오른쪽 패널은 그대로였다(실사용자
+    피드백). 반영하지 않았다는 사실을 밝히고 반영 여부를 사용자가 정하게 한다.
+    """
+    if response.intent == ConversationIntent.CONDITION_CHANGE:
+        return response
+    try:
+        updated, descriptions = apply_conversation_change(response.request, message)
+    except ValueError:
+        return response
+    # 이미 같은 조건이면(사용자가 현재 조건을 되풀이한 경우) 되물을 이유가 없다.
+    if not descriptions or updated == response.request:
+        return response
+    note = (
+        f"말씀하신 {' · '.join(descriptions)} 조건은 아직 반영하지 않았습니다. "
+        "조건을 반영해 로드맵을 생성할까요?"
+    )
+    # chip 문구는 그대로 다음 turn으로 전송된다 — "네"만 보내면 조건 변경으로
+    # 분류되지 않으므로, 바꿀 값과 "바꿔줘"를 문장 안에 그대로 담는다.
+    chip = f"네, {descriptions[0]}으로 바꿔줘"
+    return replace(
+        response,
+        reply=f"{response.reply}\n\n{note}".strip(),
+        suggested_replies=response.suggested_replies + (chip,),
+    )
 
 
 _INITIAL_ROADMAP_REQUEST = re.compile(r"입력한\s*조건으로\s*자산관리\s*로드맵을\s*만들어줘")
@@ -776,6 +815,7 @@ def execute_conversation(
     )
 
     def _finish(response: ConversationResponse) -> ConversationResponse:
+        response = _offer_unapplied_condition(response, message)
         print(
             f"[CV-09] 응답 완료 | status={response.status.value} "
             f"tools={list(response.executed_tools)} | {time.monotonic()-t0:.2f}s"
@@ -819,8 +859,11 @@ def execute_conversation(
                     updated_policy_request, message
                 )
             except ValueError:
-                if not policy_changes:
-                    raise
+                # "매달 얼마씩 저축해야 해?"처럼 조건 용어는 들어 있지만 바꿀 값이
+                # 없는 문장 — 사용자는 변경을 지시한 게 아니라 현재 계획을 물은
+                # 것이다. 예전엔 여기서 ValueError가 그대로 400으로 나가 라우터가
+                # "하위 에이전트가 응답하지 않았어요"를 띄웠다(실사용자 피드백).
+                # 조건을 그대로 두고 계산 결과로 답한다.
                 updated, changes = updated_policy_request, policy_changes
         updated_result = run_roadmap_fn(
             updated,
@@ -829,7 +872,13 @@ def execute_conversation(
             retriever=retriever,
             explainer=explainer,
         )
-        reply = " · ".join(changes) + " 조건을 반영해 전체 로드맵을 다시 계산했습니다."
+        if changes:
+            reply = " · ".join(changes) + " 조건을 반영해 전체 로드맵을 다시 계산했습니다."
+        else:
+            reply = (
+                "현재 조건으로 계산한 계획입니다. 조건을 바꾸려면 "
+                "\"매달 60만원으로 바꿔줘\"처럼 바꿀 값을 함께 알려주세요."
+            )
         return _finish(ConversationResponse(
             ConversationStatus.COMPLETED,
             plan.intent,

@@ -154,6 +154,12 @@ class RoadmapResponse(ApiModel):
     policy_eligibility_cards: list[PolicyEligibilityCard] = Field(
         default_factory=list, alias="policyEligibilityCards"
     )
+    # 프론트가 클릭 가능한 chip으로 렌더하는 제안 문구. 누르면 그 문장이 그대로
+    # 다음 turn의 사용자 메시지로 전송되므로, 의도한 intent로 분류되는 문장만
+    # 담는다(roadmap_agent.conversation._offer_unapplied_condition 참고).
+    suggested_replies: list[str] = Field(
+        default_factory=list, alias="suggestedReplies"
+    )
 
 
 class RoadmapRequestPatch(ApiModel):

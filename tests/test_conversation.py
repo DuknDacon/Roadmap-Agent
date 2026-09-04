@@ -366,6 +366,51 @@ def test_condition_change_recalculates_with_selected_tools_only():
     assert len(calls) == 1
 
 
+def test_condition_term_without_value_answers_instead_of_failing():
+    """'매달 얼마씩...' 처럼 조건 용어만 있고 바꿀 값이 없는 질문.
+
+    _CHANGE_TERMS가 '매달'을 잡아 condition_change로 분류하지만 파서는 바꿀
+    값을 못 찾는다. 예전엔 ValueError가 그대로 400으로 나가 라우터가
+    "하위 에이전트가 응답하지 않았어요"를 띄웠다(서버 로그에 5건 기록).
+    조건을 그대로 둔 채 계산 결과로 답해야 한다.
+    """
+    calls = []
+
+    def runner(request, **kwargs):
+        calls.append(request)
+        return base_result()
+
+    response = execute_conversation(
+        base_request(monthly_budget=800_000), base_result(),
+        "내 조건으로 4년 안에 5천만원 만들려면 매달 얼마씩 어떻게 굴려야 해?",
+        run_roadmap_fn=runner,
+        policy_repository=Policies(), savings_repository=EmptySavings(), retriever=Retriever(),
+    )
+    assert response.status == ConversationStatus.COMPLETED
+    assert response.changes == ()
+    assert response.request.monthly_budget == 800_000
+    assert len(calls) == 1
+
+
+def test_unapplied_condition_value_is_offered_instead_of_ignored():
+    """조건 값이 섞였지만 condition_change로 분류되지 않은 질문.
+
+    "월 70만원 ... 정부 기여금 얼마나 붙어?"는 '정부 기여금'이 먼저 걸려
+    policy_eligibility로 가고, 월 저축액은 반영되지 않는다. 예전엔 아무 안내
+    없이 무시돼 라우터가 "로드맵에 반영했습니다"라고 잘못 답하는 동안 오른쪽
+    패널은 그대로였다(서버 로그로 확인). 반영하지 않았음을 밝히고 되물어야 한다.
+    """
+    response = execute_conversation(
+        base_request(monthly_budget=800_000), base_result(),
+        "월 70만원 만기 5년 기준으로 정부 기여금 얼마나 붙어?",
+        run_roadmap_fn=lambda request, **kwargs: base_result(),
+        policy_repository=Policies(), savings_repository=EmptySavings(), retriever=Retriever(),
+    )
+    assert response.request.monthly_budget == 800_000
+    assert "반영하지 않았습니다" in response.reply
+    assert "월 투입액 700,000원" in response.reply
+
+
 def test_condition_parser_supports_target_cap_and_emergency_fund():
     response = execute_conversation(
         base_request(),
